@@ -38,5 +38,6 @@ def test_name_matches_common_spellings():
               "Klick i vilket år föll Berlinmuren"]:
         assert maybe_named(t) and not NAME.search(t), t
     assert maybe_named("Kicking them brute first sten komma i hög spee")
+    assert maybe_named("Can you hear me kick it?")
     for t in ["Kom hit nu", "Kaffe, någon?", "Can you pass the milk"]:
         assert not maybe_named(t), t

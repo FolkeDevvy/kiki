@@ -74,7 +74,12 @@ GATE_SLOT = 1
 class Models:
     def __init__(self, s: Settings) -> None:
         t = time.perf_counter()
-        self.stt = Parakeet(s.models_dir, version=s.stt_model)
+        if s.stt_model == "bilingual":
+            from kiki.server.stt import Bilingual
+
+            self.stt = Bilingual(s.models_dir, en_min_conf=s.stt_en_min_conf, kb_size=s.kb_whisper_size)
+        else:
+            self.stt = Parakeet(s.models_dir, version=s.stt_model)
         self.embed = Embedder(s.models_dir)
         self.tts = Voice(s.models_dir, en_voice=s.kiki_voice, sv_voice=s.kiki_voice_sv)
         self.llm = LLM(s.llm_url)
@@ -186,7 +191,9 @@ class Session:
             self.diag.segment(self.edge, t0, audio, "Kiki-echo", sim, text, ms)
             print(f"{t0:7.2f}  [echo of Kiki, ignored] {text}", flush=True)
             return
-        self.diag.segment(self.edge, t0, audio, who, sim, text, ms)
+        rec_id = self.diag.segment(self.edge, t0, audio, who, sim, text, ms)
+        if getattr(self.m.stt, "last", None):
+            self.diag.segments[-1].stt = dict(self.m.stt.last)
         if text:
             self._current.append(Utterance(who, text, t0, t1, sim))
             print(f"{t0:7.2f}  [{who} {sim:+.2f}] {text}   ({ms:.0f} ms)", flush=True)

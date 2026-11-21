@@ -51,7 +51,12 @@ def maybe_named(text: str) -> bool:
     candidates = w[:1] + (["".join(w)] if len(w) == 2 and len(w[1]) <= 2 else [])
     if any(c.startswith("k") and 3 <= len(c) <= 6 and _edit_distance(c, "kiki") <= 2 for c in candidates):
         return True
-    return bool(w) and w[0].startswith(("kik", "kick", "kic")) and len(w[0]) <= 8
+    if bool(w) and w[0].startswith(("kik", "kick", "kic")) and len(w[0]) <= 8:
+        return True
+    # people also put the name last: "can you hear me, Kiki?" -> "...me kick it?"
+    tail = [x.lower() for x in _WORDS.findall(text)[-2:]]
+    ends = tail[-1:] + (["".join(tail)] if len(tail) == 2 and len(tail[1]) <= 3 else [])
+    return any(c.startswith("k") and 3 <= len(c) <= 6 and _edit_distance(c, "kiki") <= 2 for c in ends)
 
 
 class _NameMatcher:
@@ -320,6 +325,8 @@ def _apply_contextual(self, v: Verdict, speaker: str, named: bool, min_p: float,
         reasons.append("talking with Kiki")
     if self._maybe_named:
         reasons.append("name-like word")
+    if text.rstrip().endswith("?"):
+        reasons.append("a question")  # people at a table answer questions to the room
     if reasons:
         if named:
             self.quiet_until = 0.0

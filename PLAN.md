@@ -191,7 +191,12 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
 ## Decisions
 
 - **Swedish + English** (2026-11-21, replaces "English only"):
-  - Speech-to-text: Parakeet TDT v3 (25 languages, detects the language itself).
+  - Speech-to-text: Parakeet v2 (English) first. If it isn't confident (mean token
+    log-prob < −0.3), the segment is treated as Swedish and transcribed with KBLab's
+    KB-Whisper base (faster-whisper, ~0.5–0.9 s/segment on the laptop). Parakeet v3's
+    own language detection kept writing short Swedish phrases as English, even
+    translating them. On the A4000, use KB-Whisper small or medium
+    (`KIKI_KB_WHISPER`).
   - Voice: Kokoro af_heart for English, Piper sv_SE Alma for Swedish, chosen per
     sentence. MOSS-TTS-Nano (one voice for both) was tried and rejected on the laptop:
     slower than real time, ran on past the end of sentences, and its Swedish was
@@ -213,7 +218,8 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
   - Turn-taking works from context, not the name. The local gate only filters out
     obvious table talk, quickly. Anything that might be for Kiki (a confident gate, a
     recent exchange with Kiki, a name or name-like word, "nobody knows" after a
-    question) goes to Claude, which sees the conversation and answers or replies PASS.
+    question, or any question at all) goes to Claude, which sees the conversation and
+    answers or replies PASS.
     `scripts/eval_gate.py --claude`: 38/38.
   - `KIKI_BRAIN=local` switches back to llama.cpp, and the server falls back to it
     if no token is set.

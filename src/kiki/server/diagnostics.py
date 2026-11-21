@@ -44,6 +44,7 @@ class SegmentRec:
     text: str
     stt_ms: float
     audio: np.ndarray = field(repr=False)
+    stt: dict = field(default_factory=dict)  # which model/language was used
 
     def public(self) -> dict:
         d = asdict(self)
@@ -130,7 +131,8 @@ class Diagnostics:
                          f"<table>{rows or '<tr><td>no stats yet</td></tr>'}</table>")
         segs = "".join(
             f"<tr><td>{ago(r.wall)}</td><td>{e(r.speaker)} <span class=m>{r.similarity:+.2f}</span></td>"
-            f"<td>{r.dur_s}s</td><td>{r.level_dbfs} / {r.peak_dbfs}</td><td>{e(r.text)}</td>"
+            f"<td>{r.dur_s}s</td><td>{r.level_dbfs} / {r.peak_dbfs}</td><td>{e(r.text)}"
+            f"<span class=m> {e(str(r.stt.get('lang', '')))} {e(str(r.stt.get('conf', '')))}</span></td>"
             f"<td><audio controls preload=none src='/seg/{r.id}.wav'></audio></td></tr>"
             for r in reversed(self.segments)
         )

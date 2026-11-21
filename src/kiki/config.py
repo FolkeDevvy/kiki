@@ -57,7 +57,13 @@ class Settings:
     # Responder
     kiki_voice: str = _env("KIKI_VOICE", "af_heart")  # Kokoro voice for English
     kiki_voice_sv: str = _env("KIKI_VOICE_SV", "alma")  # Piper voice for Swedish (alma | lisa)
-    stt_model: str = _env("KIKI_STT_MODEL", "v3")  # Parakeet: v3 = Swedish + English, v2 = English only
+    # bilingual = Parakeet v2 for English, KB-Whisper for Swedish (picked by v2's
+    # confidence); v3 = Parakeet v3 alone; v2 = English only
+    stt_model: str = _env("KIKI_STT_MODEL", "bilingual")
+    stt_en_min_conf: float = float(_env("KIKI_STT_EN_MIN_CONF", "-0.30"))
+    # base: ~0.5 s/segment on the laptop CPU and as good as small in tests; small or
+    # medium on the GPU box
+    kb_whisper_size: str = _env("KIKI_KB_WHISPER", "base")
     engagement_window_s: float = float(_env("KIKI_ENGAGEMENT_WINDOW_S", "30"))
     # 0 = only when addressed, 1 = occasional chime-ins (default), 2 = eager
     proactivity: int = int(_env("KIKI_PROACTIVITY", "1"))

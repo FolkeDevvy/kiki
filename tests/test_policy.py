@@ -79,7 +79,10 @@ def test_contextual_mode_sends_plausible_lines_to_the_responder():
     d = b.apply(v("reply", 1.0), "Folke", named=False)
     assert d.action == "reply" and d.unsure
     assert b.apply(v("reply", 0.4), "Folke", named=False).unsure  # plausible enough
+    b.hear("Folke", "Jag har köpt nya skor.")
     assert b.apply(v("silent", 1.0), "Folke", named=False).action == "silent"  # clear table talk
+    b.hear("Folke", "Har någon sett min mobil?")
+    assert b.apply(v("silent", 1.0), "Folke", named=False).unsure  # a question: Claude decides
     assert "PASS" in b.claude_message(unsure=True)
 
 
