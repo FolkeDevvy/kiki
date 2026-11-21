@@ -26,9 +26,25 @@ from kiki.protocol import dumps
 ECHO_TAIL_S = 0.4  # keep ignoring the mic briefly after playback (room reverb)
 
 
+def _smart_turn_path(s: Settings) -> Path:
+    """Preferred Smart Turn build for this CPU, else whichever one is present."""
+    want = models.smart_turn_file(s.smart_turn_model)
+    for name in (want, "smart-turn-v3.2-gpu.onnx", "smart-turn-v3.2-cpu.onnx"):
+        if (s.models_dir / name).exists():
+            if name != want:
+                print(f"[edge] {want} missing; using {name}", flush=True)
+            return s.models_dir / name
+    return models.path(s.models_dir, want)  # raises with a clear message
+
+
 def build_segmenter(s: Settings) -> Segmenter:
+    # Self-heal after updates that add edge models; ignore network trouble.
+    try:
+        models.fetch(s.models_dir, {"edge"})
+    except Exception as e:
+        print(f"[edge] couldn't fetch missing models ({e!r}); using what's on disk", flush=True)
     vad = SileroVad(models.path(s.models_dir, "silero_vad.onnx"))
-    turn = SmartTurn(models.path(s.models_dir, models.smart_turn_file(s.smart_turn_model)))
+    turn = SmartTurn(_smart_turn_path(s))
     return Segmenter(s, vad, turn)
 
 
