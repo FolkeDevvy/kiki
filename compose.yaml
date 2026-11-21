@@ -1,0 +1,41 @@
+name: kiki-agent
+
+# Dev usage on the laptop (everything self-hosted, nothing leaves the machine):
+#   docker compose build
+#   docker compose run --rm server fetch-models          # edge + server models
+#   docker compose up server                              # STT + speaker ID
+#   docker compose run --rm edge                          # laptop mic as the "Pi"
+#   docker compose run --rm edge edge --server ws://server:8765 --wav recordings/x.wav
+#   docker compose run --rm --entrypoint pytest server
+
+x-kiki: &kiki
+  build: .
+  image: kiki:dev
+  user: "${UID:-1000}:${GID:-1000}"
+  environment:
+    HOME: /tmp
+    PULSE_SERVER: unix:/run/user/${UID:-1000}/pulse/native
+  volumes:
+    - ./models:/app/models
+    - ./data:/app/data
+    - ./recordings:/app/recordings
+    - ./src:/app/src:ro
+    - ./tests:/app/tests:ro
+
+services:
+  server:
+    <<: *kiki
+    command: ["serve", "--host", "0.0.0.0"]
+    ports:
+      - "8765:8765"  # the Pi connects here
+
+  edge:
+    <<: *kiki
+    profiles: ["dev"]
+    command: ["edge", "--server", "ws://server:8765"]
+    volumes:
+      - ./models:/app/models
+      - ./recordings:/app/recordings
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - /run/user/${UID:-1000}/pulse:/run/user/${UID:-1000}/pulse

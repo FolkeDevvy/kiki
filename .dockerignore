@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+models/
+recordings/
+logs/
+.env
+.pytest_cache/
+.git/
+data/
+models/
