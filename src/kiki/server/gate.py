@@ -42,11 +42,8 @@ silent until they address Kiki by name again with a real request.
 - After Kiki answered someone, a new topic or a line aimed at someone else is silent.
 - When unsure, choose silent. Interrupting people is worse than missing a chance to talk.
 
-People speak Swedish and English. Judge Swedish lines exactly like English ones: \
-"Kiki, vad är..." addresses Kiki; "Kiki, var tyst" / "Kiki, sluta" asks for quiet; \
-"svara inte på nästa" means don't respond. The transcript comes from speech recognition, \
-so the name is sometimes mis-written ("Kiva", "Kik i", "Kicki", "Chiki"); at the start of a \
-line that's still Kiki being addressed.
+The transcript comes from speech recognition, so the name is sometimes mis-written \
+("Kicky", "kick it", "Kiko"); that's still Kiki being addressed.
 
 Examples (each ends at the line to judge):
 
@@ -81,13 +78,6 @@ Examples (each ends at the line to judge):
 
 [Bob]: Kiki, could you stop interrupting us?
 -> quiet
-
-[Folke]: Kiki, hur många invånare har Göteborg?
--> reply
-
-[Anna]: Har du köpt mjölk?
-[Folke]: Nej, jag glömde.
--> silent
 
 Transcript lines look like [Name]: text. Labels like Guest-1 are people whose names are \
 unknown. [Kiki] lines are what Kiki said. A final "(state: ...)" line, if present, is \

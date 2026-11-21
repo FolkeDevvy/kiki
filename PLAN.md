@@ -190,27 +190,16 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
 
 ## Decisions
 
-- **Swedish + English** (2026-11-21, replaces "English only"):
-  - Speech-to-text: Parakeet v2 (English) first. If it isn't confident (mean token
-    log-prob < −0.3), the segment is treated as Swedish and transcribed with KBLab's
-    KB-Whisper base (faster-whisper, ~0.5–0.9 s/segment on the laptop). Parakeet v3's
-    own language detection kept writing short Swedish phrases as English, even
-    translating them. On the A4000, use KB-Whisper small or medium
-    (`KIKI_KB_WHISPER`).
-  - Voice: Kokoro af_heart for English, Piper sv_SE Alma for Swedish, chosen per
-    sentence. MOSS-TTS-Nano (one voice for both) was tried and rejected on the laptop:
-    slower than real time, ran on past the end of sentences, and its Swedish was
-    partly unintelligible. Revisit one voice on the A4000.
-  - LLM: Gemma 4 E4B (much better Swedish than Qwen3-4B, same speed).
-  - Kiki answers in the language it was addressed in; the gate handles Swedish.
-  - A near-miss of the name at the start of a line ("Kik i…") counts only with a
-    confident gate.
+- **English only** (2026-11-21). Swedish support was built and then removed completely
+  at the user's request: Parakeet v2 for speech-to-text, Kokoro af_heart for the voice.
+- **Personality:** chill, laid-back, a bit quirky and kawaii ("dude", "lowkey", "hehe",
+  the odd "uwu"). Spoken cuteness only, no text emoticons; still brief and accurate.
 - **All voices female:** Kiki's own voices and every synthetic test speaker.
 - **Mostly self-hosted:** speech-to-text, voice, turn detection, the gate and
   speaker ID run locally (2026-11-21).
 - **Brain on Claude** (2026-11-21, reverses "local LLM only"): replies use Claude
-  Opus 5.5 at low effort (~0.8 s faster than medium, `scripts/bench_claude.py`) and
-  web research at medium effort through the Claude Agent SDK
+  Sonnet 5.5 at low effort (~0.8 s to first words, against ~3 s for Opus 5.5 low;
+  `scripts/bench_claude.py`) and web research uses Opus 5.5 at medium effort through the Claude Agent SDK
   (Claude Code), authenticated with the user's subscription
   (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`).
   - One persistent Claude session per conversation receives only the new lines.
@@ -218,13 +207,13 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
   - Turn-taking works from context, not the name. The local gate only filters out
     obvious table talk, quickly. Anything that might be for Kiki (a confident gate, a
     recent exchange with Kiki, a name or name-like word, "nobody knows" after a
-    question, or any question at all) goes to Claude, which sees the conversation and
-    answers or replies PASS.
+    question, or any question at all, and everything said within 60 s of a Kiki
+    reply) goes to Claude, which sees the conversation and answers or replies PASS.
     `scripts/eval_gate.py --claude`: 38/38.
   - `KIKI_BRAIN=local` switches back to llama.cpp, and the server falls back to it
     if no token is set.
   - Measured: first audio 3–7 s, against 2–3 s with local Gemma; lookups ~11 s,
-    against 18–40 s locally. Understanding of mis-heard names and Swedish quality
+    against 18–40 s locally. Understanding of mis-heard names and answer quality
     are far better.
 - **Proactive from day one,** with a threshold, a cooldown, and voice controls.
 - **Run in Docker** on the dev laptop.

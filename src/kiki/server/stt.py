@@ -9,15 +9,12 @@ import sherpa_onnx
 
 from kiki.config import SAMPLE_RATE
 
-MODEL_DIRS = {
-    "v2": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",  # English only
-    "v3": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",  # 25 European languages incl. Swedish
-}
+MODEL_DIR = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
 
 
 class Parakeet:
-    def __init__(self, models_dir: Path, num_threads: int = 4, version: str = "v3") -> None:
-        d = models_dir / MODEL_DIRS[version]
+    def __init__(self, models_dir: Path, num_threads: int = 4) -> None:
+        d = models_dir / MODEL_DIR
         if not d.exists():
             raise FileNotFoundError(f"{d} missing; run `kiki fetch-models --server`")
         self._rec = sherpa_onnx.OfflineRecognizer.from_transducer(
@@ -33,8 +30,7 @@ class Parakeet:
         )
 
     def decode(self, audio: np.ndarray) -> tuple[str, float]:
-        """(text, mean token log-probability). Low confidence on the English-only
-        model is a strong hint that the speech wasn't English."""
+        """(text, mean token log-probability)."""
         x = audio.astype(np.float32)
         if audio.dtype == np.int16:
             x /= 32768.0
@@ -47,55 +43,3 @@ class Parakeet:
     def __call__(self, audio: np.ndarray) -> str:
         return self.decode(audio)[0]
 
-
-class KBWhisper:
-    """KBLab's Swedish Whisper (CTranslate2 via faster-whisper). Swedish only:
-    it can't do English, so it's used when the English model isn't confident."""
-
-    def __init__(self, models_dir: Path, size: str = "small", num_threads: int = 4) -> None:
-        from faster_whisper import WhisperModel
-
-        self._m = WhisperModel(f"KBLab/kb-whisper-{size}", device="cpu", compute_type="int8",
-                               cpu_threads=num_threads, download_root=str(models_dir / "hf"))
-
-    def __call__(self, audio: np.ndarray) -> str:
-        x = audio.astype(np.float32)
-        if audio.dtype == np.int16:
-            x /= 32768.0
-        segs, _ = self._m.transcribe(x, language="sv", beam_size=1, condition_on_previous_text=False,
-                                     without_timestamps=True, vad_filter=False)
-        return " ".join(sg.text.strip() for sg in segs).strip()
-
-
-class Bilingual:
-    """English first with Parakeet v2 (fast, best English); if it isn't confident,
-    the speech is probably Swedish, so use KB-Whisper. (Parakeet v3's own language
-    detection kept writing short Swedish phrases as English, even translating them.)"""
-
-    def __init__(self, models_dir: Path, en_min_conf: float = -0.30, kb_size: str = "base") -> None:
-        self.en = Parakeet(models_dir, version="v2")
-        self.sv = KBWhisper(models_dir, size=kb_size)
-        self.en_min_conf = en_min_conf
-        self.last: dict = {}
-        self.recent: list[str] = []  # languages of recent segments (conversation prior)
-
-    def threshold(self, audio: np.ndarray) -> float:
-        """Short phrases in a Swedish conversation ("Tack", "Okej", "Tack bror") get
-        English-looking transcripts with decent confidence; demand much more then."""
-        swedish_talk = self.recent[-5:].count("sv") >= 3
-        short = len(audio) < SAMPLE_RATE * 1.8
-        return -0.06 if (swedish_talk and short) else self.en_min_conf
-
-    def __call__(self, audio: np.ndarray) -> str:
-        text, conf = self.en.decode(audio)
-        out = self._route(audio, text, conf)
-        self.recent = (self.recent + [self.last["lang"]])[-10:]
-        return out
-
-    def _route(self, audio: np.ndarray, text: str, conf: float) -> str:
-        if conf >= self.threshold(audio) and text:
-            self.last = {"lang": "en", "conf": round(conf, 2), "en_text": text}
-            return text
-        sv = self.sv(audio)
-        self.last = {"lang": "sv", "conf": round(conf, 2), "en_text": text}
-        return sv or text

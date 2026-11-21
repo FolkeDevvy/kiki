@@ -43,7 +43,10 @@ class Settings:
     # CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`), "local" = llama.cpp.
     # The turn-taking gate always runs locally (it judges every turn).
     brain: str = _env("KIKI_BRAIN", "claude")
-    claude_model: str = _env("KIKI_CLAUDE_MODEL", "claude-opus-5-5")
+    # replies: Sonnet 5.5 low = ~0.8 s to first words (Opus 5.5 low: ~3 s, Haiku 5.5: ~0.6 s)
+    claude_model: str = _env("KIKI_CLAUDE_MODEL", "claude-sonnet-5-5")
+    # research runs in the background: quality over speed
+    claude_research_model: str = _env("KIKI_CLAUDE_RESEARCH_MODEL", "claude-opus-5-5")
     # replies: low = ~0.8 s faster first words (median 1.8 s vs 2.6 s, p90 2.7 vs 4.3 s,
     # scripts/bench_claude.py); research runs in the background, so it keeps medium
     claude_effort: str = _env("KIKI_CLAUDE_EFFORT", "low")
@@ -55,15 +58,7 @@ class Settings:
     # LLM (llama.cpp server, OpenAI-compatible)
     llm_url: str = _env("KIKI_LLM_URL", "http://localhost:8081")
     # Responder
-    kiki_voice: str = _env("KIKI_VOICE", "af_heart")  # Kokoro voice for English
-    kiki_voice_sv: str = _env("KIKI_VOICE_SV", "alma")  # Piper voice for Swedish (alma | lisa)
-    # bilingual = Parakeet v2 for English, KB-Whisper for Swedish (picked by v2's
-    # confidence); v3 = Parakeet v3 alone; v2 = English only
-    stt_model: str = _env("KIKI_STT_MODEL", "bilingual")
-    stt_en_min_conf: float = float(_env("KIKI_STT_EN_MIN_CONF", "-0.30"))
-    # base: ~0.5 s/segment on the laptop CPU and as good as small in tests; small or
-    # medium on the GPU box
-    kb_whisper_size: str = _env("KIKI_KB_WHISPER", "base")
+    kiki_voice: str = _env("KIKI_VOICE", "af_heart")  # Kokoro voice
     engagement_window_s: float = float(_env("KIKI_ENGAGEMENT_WINDOW_S", "30"))
     # 0 = only when addressed, 1 = occasional chime-ins (default), 2 = eager
     proactivity: int = int(_env("KIKI_PROACTIVITY", "1"))

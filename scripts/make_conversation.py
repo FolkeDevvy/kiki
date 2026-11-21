@@ -18,7 +18,6 @@ from kiki.audio.sources import read_wav, write_wav
 
 # All test speakers are female, and none shares Kiki's own voices (af_heart, alma).
 KOKORO = {"anna": "af_bella", "bea": "bf_emma", "cleo": "af_sarah"}
-PIPER_SV = {"sara": "lisa"}  # Swedish speaker
 ESPEAK = {"anna": ["-v", "en-us+f3", "-s", "150", "-p", "60"],
           "bea": ["-v", "en-gb+f2", "-s", "140", "-p", "50"],
           "cleo": ["-v", "en-us+f4", "-s", "160", "-p", "45"]}
@@ -32,22 +31,19 @@ SCRIPTS["dinner"] = [
     ("bea", "Anyway, I can call them tomorrow morning and check.", 1.0),
     ("cleo", "Great, thanks Bea.", 2.0),
 ]
-SCRIPTS["svenska"] = [
-    ("sara", "Kiki, vad är huvudstaden i Norge?", 5.0),
-    ("sara", "Anna, har du köpt mjölk förresten?", 1.0),
-    ("anna", "No, I forgot.", 2.5),
-    ("sara", "Kiki, svara inte på nästa sak jag säger.", 3.0),
-    ("sara", "Det finns jättemånga äpplen i trädgården i år.", 3.0),
-    ("sara", "Kiki, hur länge ska man koka ett ägg?", 5.0),
-    ("anna", "Kiki, what's the capital of Denmark?", 5.0),
-    ("sara", "Kiki, vilket år föll Berlinmuren?", 5.0),
+SCRIPTS["followup"] = [  # follow-ups that aren't questions should still get replies
+    ("anna", "Kiki, what's the capital of Norway?", 5.0),
+    ("anna", "Oh nice, I've never been there.", 5.0),
+    ("anna", "My sister actually lives in Bergen though.", 5.0),
+    ("anna", "Anyway Bea, are you coming to dinner tomorrow?", 1.2),
+    ("bea", "Yes, I'll be there at seven.", 4.0),
 ]
 SCRIPTS["lookup"] = [
     ("anna", "Kiki, what's the weather going to be like in Stockholm tomorrow?", 3.0),
-    ("sara", "Anna, ska vi gå på bio ikväll?", 1.0),
+    ("bea", "Anna, do you want to go to the cinema tonight?", 1.0),
     ("anna", "Sure, which movie?", 1.5),
-    ("sara", "Kiki, vad är huvudstaden i Norge?", 5.0),
-    ("sara", "Jag vet inte vilken film, vi får se.", 40.0),
+    ("bea", "Kiki, what's the capital of Norway?", 5.0),
+    ("bea", "I don't know which movie yet, we'll see.", 40.0),
 ]
 SCRIPTS["manners"] = [
     ("anna", "Kiki, don't respond to the next thing I say.", 2.5),
@@ -73,10 +69,7 @@ def main() -> None:
         from kiki import config
         from kiki.server.tts import Kokoro, resample
 
-        from kiki.server.tts_sv import PiperSwedish
-
         tts = Kokoro(config.load().models_dir)
-        sv_tts = {name: PiperSwedish(config.load().models_dir, voice=v) for name, v in PIPER_SV.items()}
 
     parts, truth, t = [np.zeros(8000, np.int16)], [], 0.5
     with tempfile.TemporaryDirectory() as d:
@@ -86,10 +79,7 @@ def main() -> None:
                 subprocess.run(["espeak-ng", *ESPEAK[who], "-w", str(wav), text], check=True)
                 audio = read_wav(wav)
             else:
-                if who in sv_tts:
-                    x, sr = sv_tts[who](text), sv_tts[who].sample_rate
-                else:
-                    x, sr = tts(text, voice=KOKORO[who]), tts.sample_rate
+                x, sr = tts(text, voice=KOKORO[who]), tts.sample_rate
                 audio = (np.clip(resample(x, sr, 16000), -1, 1) * 32767).astype(np.int16)
             truth.append(f"{who}\t{t:.2f}\t{text}")
             parts += [audio, np.zeros(int(gap * 16000), np.int16)]

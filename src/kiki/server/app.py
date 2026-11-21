@@ -28,13 +28,12 @@ from kiki.server.brain import NAME, PERSONA_CLAUDE, Brain, Decision, is_pass, ma
 from kiki.server.diagnostics import Diagnostics
 from kiki.server.diagnostics import serve as serve_diagnostics
 from kiki.server.gate import Gate
-from kiki.server.lang import detect
 from kiki.server.research import Lookup, Researcher, promised_lookup, query_from_question, split_lookup
 from kiki.server.llm import LLM
 from kiki.server.speakers import Embedder, Registry
 from kiki.server.speech import sentences
 from kiki.server.stt import Parakeet
-from kiki.server.tts import Voice
+from kiki.server.tts import Kokoro
 
 
 @dataclass
@@ -74,14 +73,9 @@ GATE_SLOT = 1
 class Models:
     def __init__(self, s: Settings) -> None:
         t = time.perf_counter()
-        if s.stt_model == "bilingual":
-            from kiki.server.stt import Bilingual
-
-            self.stt = Bilingual(s.models_dir, en_min_conf=s.stt_en_min_conf, kb_size=s.kb_whisper_size)
-        else:
-            self.stt = Parakeet(s.models_dir, version=s.stt_model)
+        self.stt = Parakeet(s.models_dir)
         self.embed = Embedder(s.models_dir)
-        self.tts = Voice(s.models_dir, en_voice=s.kiki_voice, sv_voice=s.kiki_voice_sv)
+        self.tts = Kokoro(s.models_dir, voice=s.kiki_voice)
         self.llm = LLM(s.llm_url)
         self.gate = Gate(s.llm_url, slot=GATE_SLOT)
         self.research = Researcher(s.search_url, self.llm) if s.search_url else None
@@ -89,15 +83,15 @@ class Models:
         if s.brain == "claude" and not self.use_claude:
             print("[server] KIKI_BRAIN=claude but no CLAUDE_CODE_OAUTH_TOKEN; using the local brain", flush=True)
         if self.use_claude:
-            self.research = claude_brain.ClaudeResearcher(s.claude_model, s.claude_research_effort)
-            print(f"[server] brain: Claude ({s.claude_model}, effort {s.claude_effort} for replies, "
-                  f"{s.claude_research_effort} for research) via Claude Code", flush=True)
+            self.research = claude_brain.ClaudeResearcher(s.claude_research_model, s.claude_research_effort)
+            print(f"[server] brain: Claude via Claude Code: replies {s.claude_model} ({s.claude_effort}), "
+                  f"research {s.claude_research_model} ({s.claude_research_effort})",
+                  flush=True)
         self.claude_model, self.claude_effort = s.claude_model, s.claude_effort
         # TTS gets its own thread so replies never queue behind transcription
         self.tts_pool = ThreadPoolExecutor(max_workers=1)
         # first inference allocates buffers and is ~2x slower; pay that now
         self.tts("Hello there, warming up.")
-        self.tts("Hej, jag värmer upp.")
         self.stt(np.zeros(SAMPLE_RATE, np.int16))
         self.embed(np.zeros(SAMPLE_RATE, np.int16))
         print(f"[server] models loaded and warmed up in {time.perf_counter() - t:.1f}s", flush=True)
@@ -226,7 +220,14 @@ class Session:
     async def _decide_and_act(self, turn: Turn, speaker: str, received: float) -> None:
         decision = asyncio.create_task(self.brain.decide(speaker, turn.text))
         spec: asyncio.Task | None = None
-        likely = maybe_named(turn.text) if self.claude is not None else self.brain.likely_reply(turn.text)
+        if self.claude is not None:
+            # Claude makes the call (or PASSes), so start it right away for obvious
+            # candidates instead of waiting ~0.8 s for the local gate; audio still waits
+            # for the gate (quiet requests), which is almost always done first.
+            likely = (maybe_named(turn.text) or turn.text.rstrip().endswith("?")
+                      or (self.brain.conversing() and not self.brain.quiet))
+        else:
+            likely = self.brain.likely_reply(turn.text)
         if likely and not self._replying():
             # speculative: generate while the gate thinks; audio waits for its verdict
             spec = self._reply = asyncio.create_task(self._speak(decision, received, chime=False, question=turn.text))
@@ -291,8 +292,6 @@ class Session:
         def deltas():
             return raw() if chime else split_lookup(raw(), lookup_query.append)
 
-        # ambiguous sentences ("1990.") are spoken in the language Kiki was addressed in
-        lang_default = self.brain.reply_language()
         text = ""
         d: Decision | None = None
         try:
@@ -309,7 +308,7 @@ class Session:
                         self._prewarm()
                         return
                 audio = await loop.run_in_executor(
-                    self.m.tts_pool, lambda: self.m.tts(sentence, default=lang_default)
+                    self.m.tts_pool, lambda: self.m.tts(sentence)
                 )
                 pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
                 if first_audio is None:
@@ -346,14 +345,15 @@ class Session:
         if not question:
             heard = [l for l in self.brain.history if l.speaker != "Kiki"]
             question = heard[-1].text if heard else ""
-        if not lookup_query and not chime and text and promised_lookup(text) and question:
+        if (not lookup_query and not chime and text and question and not self.brain.looking_up
+                and promised_lookup(text)):
             lookup_query.append(query_from_question(question))  # promised to check, forgot the marker
         if lookup_query:
             if d is None:  # marker-only reply: nothing was spoken, so check the gate now
                 d = await decision
                 if d.action != "reply":
                     return  # speculative reply that wasn't approved: no lookup either
-            self._start_lookup(Lookup(lookup_query[0], question or lookup_query[0], lang_default, d.target))
+            self._start_lookup(Lookup(lookup_query[0], question or lookup_query[0], d.target))
 
     def _is_own_echo(self, text: str, window_s: float = 8.0) -> bool:
         """Did the mic just pick up Kiki's own voice? (the edge mutes while playing,
@@ -383,15 +383,14 @@ class Session:
     async def _lookup(self, lk: Lookup) -> None:
         try:
             if self.m.research is None:
-                lk.answer = ("Jag kan inte söka på nätet just nu." if lk.language == "sv"
-                             else "I can't search the web right now.")
+                lk.answer = "I can't search the web right now."
             else:
                 await self.m.research.run(lk, self.brain.transcript())
             src = ", ".join(s.site for s in lk.sources[:3])
             print(f"          [Kiki] (lookup done in {time.time() - lk.started:.0f}s via {src or '-'}"
                   f"{'; error ' + lk.error if lk.error else ''})", flush=True)
             await self._wait_for_floor()
-            await self._say_text(lk.answer, lk.language, target=lk.asker)
+            await self._say_text(lk.answer, target=lk.asker)
             self.diag.reply(self.edge, {"text": lk.answer, "lookup": lk.query,
                                         "sources": [s.url for s in lk.sources[:3]],
                                         "seconds": round(time.time() - lk.started, 1), "error": lk.error})
@@ -411,7 +410,7 @@ class Session:
                 return
             await asyncio.sleep(0.2)
 
-    async def _say_text(self, text: str, lang: str, target: str | None) -> None:
+    async def _say_text(self, text: str, target: str | None) -> None:
         """Speak a ready-made text (no LLM), sentence by sentence."""
         assert self.ws is not None
         loop = asyncio.get_running_loop()
@@ -423,7 +422,7 @@ class Session:
         said: list[str] = []
         try:
             async for sentence in sentences(once()):
-                audio = await loop.run_in_executor(self.m.tts_pool, lambda: self.m.tts(sentence, default=lang))
+                audio = await loop.run_in_executor(self.m.tts_pool, lambda: self.m.tts(sentence))
                 if not said:
                     await self.ws.send(dumps("say", id=say_id, sample_rate=self.m.tts.sample_rate))
                 await self.ws.send((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())

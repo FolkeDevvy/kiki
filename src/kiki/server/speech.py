@@ -12,7 +12,7 @@ _EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0000FE0F\U0001
 _SPEAKER_TAG = re.compile(r"^\s*\[?\*{0,2}kiki\*{0,2}\]?\s*:\s*", re.IGNORECASE)
 
 
-_SOURCES = re.compile(r"\n\s*(sources?|källor|källa|references?)\s*:.*", re.IGNORECASE | re.DOTALL)
+_SOURCES = re.compile(r"\n\s*(sources?|references?)\s*:.*", re.IGNORECASE | re.DOTALL)
 _MD_LINK = re.compile(r"\[([^\]]*)\]\((https?://[^)]*)\)")
 _URL = re.compile(r"\(?https?://\S+\)?")
 

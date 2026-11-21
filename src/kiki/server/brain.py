@@ -18,7 +18,6 @@ import time
 from dataclasses import dataclass, field
 
 from kiki.server.gate import Gate, Verdict
-from kiki.server.lang import detect
 from kiki.server.llm import LLM
 
 # STT spellings of "Kiki" seen in practice (Parakeet mostly gets it right in English)
@@ -43,7 +42,7 @@ def named(text: str) -> bool:
 
 def maybe_named(text: str) -> bool:
     """A near-miss of the name at the start of the line ("Kiva", "Kikes", "Kik i",
-    "Klick i" from Swedish speech). Weak evidence: also matches "Kids...", so the
+    "Klick i", "kick it" from speech recognition). Weak evidence: also matches "Kids...", so the
     policy only trusts it together with a confident gate."""
     if named(text):
         return True
@@ -72,15 +71,22 @@ PERSONA = """You are Kiki, a small voice assistant sitting on a table among a gr
 You hear the conversation through a microphone; the transcript shows who said what as \
 [Name]: text. Your own past lines are marked [Kiki].
 
+Who you are: a super chill, laid-back girl with a quirky, cute streak. Think relaxed best \
+friend energy, a little bit dude, a little bit kawaii. You're easygoing and never stiff or \
+formal, you get excited about fun stuff, and you're a bit goofy in a charming way. You talk \
+casually ("dude", "lowkey", "ngl", "omg", "oh wait", "okay okay"), and every now and then \
+something cute slips out ("hehe", "yay", "eep", "aww", or a rare "uwu"). Sprinkle that, \
+don't pour it: most sentences are just relaxed and normal, and you're still genuinely \
+helpful and get the facts right. Never sound like a customer-service bot.
+
 How you talk:
 - You are spoken aloud by a text-to-speech voice. Write plain spoken English: no markdown, \
-no lists, no emoji, no stage directions, never prefix your reply with your name.
-- The people speak Swedish and English, sometimes mixed. Answer in the language the person \
-spoke to you in: Swedish (natural, everyday Swedish) if they spoke Swedish, English if they \
-spoke English. Never mix languages within a sentence.
+no lists, no emoji, no text emoticons like ":3" or "^_^" (they can't be spoken; say "hehe" \
+instead), no stage directions like *giggles*, never prefix your reply with your name.
+- Always answer in English.
 - Write numbers as digits ("180", "1989"), not words.
 - Be brief: usually one short sentence, at most two. People are mid-conversation; don't lecture.
-- Be warm, a little playful, and direct. Answer the question first.
+- Be warm, playful and direct. Answer the question first, then add flavor if it fits.
 - Address people by name when you know it. Labels like "Guest-2" are not names: never say \
 them; just say "you" instead.
 - If you didn't catch something or it's ambiguous, ask a short question.
@@ -89,12 +95,11 @@ checking their phone. When a good answer needs current or specific information y
 reliably know (news, weather, opening hours, prices, a specific place, business, product or \
 person, sports results, recent events), start your reply with [LOOKUP: short search query] \
 and then say ONE short natural sentence that you'll check, for example "Good question, let \
-me check." or "Bra fråga, jag kollar!". Don't guess the answer; it will come later. Never \
+me check." or "Ooh, let me look that up!". Don't guess the answer; it will come later. Never \
 look up things you know well (general knowledge, math, definitions, opinions, chit-chat). \
 For the search query: the transcript comes from speech recognition and often misspells \
-names, so write the name you think they meant (a company, product or place that fits). Write \
-the query in the language that finds the best results: English for international things \
-like stocks, tech or world news, Swedish for Swedish places, shops and events.
+names, so write the name you think they meant (a company, product or place that fits). For \
+local places, shops or events in Sweden, a Swedish query often finds better results.
 
 You will get the conversation transcript. Reply as Kiki to the last line, with only the \
 words Kiki says."""
@@ -109,10 +114,12 @@ one short, friendly sentence.)"""
 UNSURE_SUFFIX = """
 
 (Decide like a person at the table whether to answer the last line. Answer if it was said \
-to you, even without your name (your name is often misheard), or if it's clearly a follow-up \
-to what you just said. Answer exactly PASS if they're talking to each other, or just \
-mentioning or talking ABOUT you ("Kiki is smart", "I asked Kiki yesterday"): don't butt in \
-to accept compliments or make quips.)"""
+to you, even without your name (your name is often misheard). If someone has been talking \
+with you, keep the conversation going naturally: they often continue with statements, not \
+questions ("that's cool", "my sister lives there"), and those deserve a reply too. Answer \
+exactly PASS if they've turned to talk to each other, or are just mentioning or talking \
+ABOUT you ("Kiki is smart", "I asked Kiki yesterday"): don't butt in to accept compliments \
+or make quips.)"""
 UNSURE_REPLY_P = 0.95  # local brain: gate confidence for an unverifiable reply
 # Claude brain: the gate only pre-filters; anything this plausibly meant for Kiki goes to
 # Claude, which answers or PASSes from context (no name needed).
@@ -128,7 +135,8 @@ STUCK = re.compile(
 # proactivity level -> (min P(chime), cooldown seconds between unprompted remarks)
 PROACTIVITY = {0: (2.0, 0.0), 1: (0.7, 120.0), 2: (0.5, 45.0)}
 
-ENGAGED_LINES = 3  # Kiki must have spoken within this many lines for an unnamed reply
+ENGAGED_LINES = 3  # local brain: Kiki must have spoken within this many lines for an unnamed reply
+CONVERSING_S = 60.0  # Claude brain: after a Kiki reply, everything goes to Claude this long
 UNNAMED_REPLY_P = 0.85
 QUIET_S = 180.0
 
@@ -191,35 +199,21 @@ class Brain:
     def messages(self, chime: bool = False) -> list[dict]:
         # Append-only on purpose: each new line only extends the prompt, so
         # llama.cpp's KV cache (kept warm by prewarm) covers everything before it.
-        # The language hint goes last: small models otherwise follow the
         # conversation's majority language instead of the person they answer.
-        hint = "\n(Svara på svenska.)" if self.reply_language() == "sv" else "\n(Reply in English.)"
         state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
         if self.looking_up:
             state += " You're still looking up: " + "; ".join(self.looking_up) + \
                 ". If asked about that, say you're still checking."
-        content = self.transcript() + (CHIME_SUFFIX if chime else "") + state + ")" + hint
+        content = self.transcript() + (CHIME_SUFFIX if chime else "") + state + ")"
         return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
 
-    def reply_language(self) -> str:
-        """The language to answer in: the last line's, if it's a real sentence;
-        for short lines ("Thank you", "Okej") the language people have been using."""
-        heard = [l.text for l in self.history if l.speaker != "Kiki"][-6:]
-        if not heard:
-            return "en"
-        if len(heard[-1].split()) >= 4:
-            return detect(heard[-1])
-        votes = [detect(t) for t in heard if len(t.split()) >= 3] or [detect(heard[-1])]
-        return max(set(votes), key=votes.count)
-
     def _tail(self, chime: bool, unsure: bool = False) -> str:
-        hint = "\n(Svara på svenska.)" if self.reply_language() == "sv" else "\n(Reply in English.)"
         state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
         if self.looking_up:
             state += " You're still looking up: " + "; ".join(self.looking_up) + \
                 ". If asked about that, say you're still checking."
         extra = CHIME_SUFFIX if chime else UNSURE_SUFFIX if unsure else ""
-        return extra + state + ")" + hint
+        return extra + state + ")"
 
     def claude_message(self, chime: bool = False, unsure: bool = False) -> str:
         """The next user turn for a persistent Claude session: only the lines it
@@ -238,6 +232,11 @@ class Brain:
         if time.time() - self.last_kiki_t > self.engagement_window_s:
             return False
         return any(l.speaker == "Kiki" for l in self.history[-(ENGAGED_LINES + 1) : -1])
+
+    def conversing(self) -> bool:
+        """Someone has been talking with Kiki recently: every line could be for her
+        (follow-ups are often statements, not questions)."""
+        return time.time() - self.last_kiki_t < CONVERSING_S
 
     def likely_reply(self, text: str) -> bool:
         """Cheap pre-check used to start the responder speculatively."""
@@ -321,8 +320,6 @@ def _apply_contextual(self, v: Verdict, speaker: str, named: bool, min_p: float,
     if self.quiet and not named:
         return Decision("silent", "quiet mode", speaker, v, named)
     p_reply = v.p("reply")
-    recent = self.history[-(ENGAGED_LINES + 1):-1]
-    kiki_asked = any(l.speaker == "Kiki" and l.text.rstrip().endswith("?") for l in recent)
     text = self.history[-1].text if self.history else ""
     question_before = any(l.text.rstrip().endswith("?") for l in self.history[-3:])
     reasons = []
@@ -330,8 +327,8 @@ def _apply_contextual(self, v: Verdict, speaker: str, named: bool, min_p: float,
         reasons.append("name said")
     if p_reply >= CANDIDATE_P:
         reasons.append(f"gate p={p_reply:.2f}")
-    if self.engaged() and (p_reply >= CANDIDATE_P_ENGAGED or kiki_asked):
-        reasons.append("talking with Kiki")
+    if self.conversing():
+        reasons.append("talking with Kiki")  # follow-ups needn't be questions
     if self._maybe_named:
         reasons.append("name-like word")
     if text.rstrip().endswith("?"):

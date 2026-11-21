@@ -12,14 +12,14 @@ from kiki.server.research import LOOKUP_MARK
 
 CASES = [  # (line, should look up?)
     ("[Anna]: Kiki, what's the weather going to be like in Stockholm tomorrow?", True),
-    ("[Sara]: Kiki, vad kostar en biljett till Liseberg i år?", True),
+    ("[Sara]: Kiki, how much is a ticket to Liseberg this year?", True),
     ("[Anna]: Kiki, when does the ICA Maxi in Lund close on Sundays?", True),
-    ("[Sara]: Kiki, vem vann senaste Melodifestivalen?", True),
+    ("[Sara]: Kiki, who won the last Eurovision?", True),
     ("[Anna]: Kiki, what's the latest news about the Artemis moon mission?", True),
     ("[Anna]: Kiki, what's the capital of Norway?", False),
-    ("[Sara]: Kiki, hur mycket är tolv gånger femton?", False),
+    ("[Sara]: Kiki, what's twelve times fifteen?", False),
     ("[Anna]: Kiki, tell us a joke.", False),
-    ("[Sara]: Kiki, vad betyder ordet 'lagom'?", False),
+    ("[Sara]: Kiki, what does the word 'serendipity' mean?", False),
     ("[Anna]: Kiki, how are you today?", False),
 ]
 

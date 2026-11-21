@@ -57,7 +57,6 @@ class Source:
 class Lookup:
     query: str
     question: str  # the line that triggered it
-    language: str  # "sv" | "en"
     asker: str | None
     started: float = field(default_factory=time.time)
     sources: list[Source] = field(default_factory=list)
@@ -73,10 +72,10 @@ class Researcher:
         self.timeout_s = timeout_s
         self._http = httpx.AsyncClient(timeout=6.0, follow_redirects=True, headers={"User-Agent": UA})
 
-    async def search(self, query: str, language: str) -> list[Source]:
+    async def search(self, query: str) -> list[Source]:
         r = await self._http.get(
             f"{self.search_url}/search",
-            params={"q": query, "format": "json", "language": "sv-SE" if language == "sv" else "en"},
+            params={"q": query, "format": "json", "language": "en"},
             timeout=12.0,
         )
         r.raise_for_status()
@@ -106,7 +105,7 @@ class Researcher:
         t0 = time.perf_counter()
         try:
             async with asyncio.timeout(self.timeout_s):
-                lk.sources = await self.search(lk.query, lk.language)
+                lk.sources = await self.search(lk.query)
                 lk.timings["search"] = time.perf_counter() - t0
                 await asyncio.gather(*(self.read(s) for s in lk.sources[:PAGES]))
                 lk.timings["read"] = time.perf_counter() - t0
@@ -115,10 +114,7 @@ class Researcher:
         except Exception as e:
             lk.error = repr(e)
         if not lk.answer:
-            lk.answer = (
-                "Jag försökte kolla upp det, men hittade inget bra svar." if lk.language == "sv"
-                else "I tried to look that up, but couldn't find a good answer."
-            )
+            lk.answer = "I tried to look that up, but couldn't find a good answer."
         return lk
 
     async def summarize(self, lk: Lookup, conversation: str) -> str:
@@ -133,10 +129,7 @@ class Researcher:
                 material.append(f"[{i}] {s.title} ({s.site})\n{body}")
         if not material:
             return ""
-        if lk.language == "sv":
-            fmt = {"language": "Swedish", "opener": '"Okej, jag kollade:"', "source": '"enligt SMHI"'}
-        else:
-            fmt = {"language": "English", "opener": '"So, I looked it up:"', "source": '"according to Wikipedia"'}
+        fmt = {"language": "English", "opener": '"So, I looked it up:"', "source": '"according to Wikipedia"'}
         user = (
             f"Conversation (most recent last):\n{conversation}\n\n"
             f"Question to answer: {lk.question}\nSearch query used: {lk.query}\n\n"
@@ -153,7 +146,7 @@ class Researcher:
 
 # ---- the responder's lookup marker -------------------------------------------------
 
-LOOKUP_MARK = re.compile(r"^\s*\[\s*(?:LOOKUP|SÖK|SOK)\s*:\s*([^\]]{2,200})\]\s*", re.IGNORECASE)
+LOOKUP_MARK = re.compile(r"^\s*\[\s*LOOKUP\s*:\s*([^\]]{2,200})\]\s*", re.IGNORECASE)
 
 
 async def split_lookup(deltas, on_lookup) -> "AsyncIterator[str]":
@@ -187,10 +180,10 @@ async def split_lookup(deltas, on_lookup) -> "AsyncIterator[str]":
         yield buf
 
 
-# A reply that promises to check but forgot the marker ("Bra fråga, jag kollar!")
+# A reply that promises to check but forgot the marker ("Good question, let me check!")
 PROMISE = re.compile(
-    r"\b(jag kollar|ska kolla|kollar upp|kolla upp|jag söker|ska söka|let me check|i'?ll check|"
-    r"let me look|i'?ll look (it|that) up|checking (now|that)|look it up)\b",
+    r"\b(let me (quickly )?(check|look (it|that) up|look into)|i'?ll (quickly )?(check|look (it|that) up)|"
+    r"lemme check|gonna look (it|that) up|one sec,? (i'?ll|let me) check)\b",
     re.IGNORECASE,
 )
 
@@ -201,5 +194,5 @@ def promised_lookup(reply: str) -> bool:
 
 def query_from_question(question: str) -> str:
     """Fallback search query: the question without Kiki's name and filler."""
-    q = re.sub(r"^\W*(hey|hej|hallå|okej|ok)?\W*k\w{1,4}\b[,!]?\s*", "", question, flags=re.IGNORECASE)
+    q = re.sub(r"^\W*(hey|hi|okay|ok)?\W*k\w{1,4}\b[,!]?\s*", "", question, flags=re.IGNORECASE)
     return q.strip(" ?.!") or question

@@ -46,20 +46,8 @@ def test_name_matches_common_spellings():
 def test_sources_and_links_are_never_spoken():
     from kiki.server.speech import clean, strip_sources
 
-    a = ("Okej, jag kollade på Yr: klart och minus 2 grader.\n\nSources:\n"
+    a = ("So, I checked Yr: clear and minus 2 degrees.\n\nSources:\n"
          "- [Yr – Aneboda](https://www.yr.no/en/forecast/x)")
-    assert strip_sources(a) == "Okej, jag kollade på Yr: klart och minus 2 grader."
-    assert clean("Enligt [Yr](https://yr.no) blir det snö.") == "Enligt Yr blir det snö."
-    assert "http" not in clean("Se https://example.com för mer.")
-
-
-def test_reply_language_follows_the_conversation():
-    from kiki.server.brain import Brain
-
-    b = Brain(llm=None, gate=None)
-    b.hear("Folke", "Hej Kiki, vad är vädret nere i Aneboda?")
-    b.hear("Folke", "Vi får se om den här lyckas.")
-    b.hear("Folke", "Thank you, bro.")
-    assert b.reply_language() == "sv"  # short English-looking line in a Swedish talk
-    b.hear("Folke", "Could you tell me what the weather is like in London?")
-    assert b.reply_language() == "en"  # a real English sentence switches
+    assert strip_sources(a) == "So, I checked Yr: clear and minus 2 degrees."
+    assert clean("According to [Yr](https://yr.no), it will snow.") == "According to Yr, it will snow."
+    assert "http" not in clean("See https://example.com for more.")

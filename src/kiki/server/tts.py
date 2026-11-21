@@ -10,7 +10,7 @@ import sherpa_onnx
 from kiki.server.phonemize import Phonemizer
 
 MODEL_DIR = "kokoro-multi-lang-v1_0"
-# speaker ids in kokoro-multi-lang-v1_0 (English subset)
+# speaker ids in kokoro-multi-lang-v1_0 (English voices)
 VOICES = {
     "af_alloy": 0, "af_aoede": 1, "af_bella": 2, "af_heart": 3, "af_jessica": 4, "af_kore": 5,
     "af_nicole": 6, "af_nova": 7, "af_river": 8, "af_sarah": 9, "af_sky": 10, "am_adam": 11,
@@ -61,23 +61,3 @@ def resample(x: np.ndarray, src: int, dst: int) -> np.ndarray:
     n = int(round(len(x) * dst / src))
     return np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype(np.float32)
 
-
-class Voice:
-    """Kiki's voice in both languages: Kokoro for English, Piper for Swedish.
-    Picks per sentence and always returns audio at `sample_rate`."""
-
-    def __init__(self, models_dir: Path, en_voice: str = "af_heart", sv_voice: str = "alma") -> None:
-        from kiki.server.tts_sv import PiperSwedish
-
-        self.en = Kokoro(models_dir, voice=en_voice)
-        self.sv = PiperSwedish(models_dir, voice=sv_voice)
-        self.sample_rate = self.en.sample_rate
-
-    def __call__(self, text: str, lang: str | None = None, default: str = "en") -> np.ndarray:
-        """`lang` forces a language; otherwise it's detected from the text, with
-        `default` (the language Kiki was spoken to in) for things like "1990."."""
-        from kiki.server.lang import detect
-
-        if (lang or detect(text, default=default)) == "sv":
-            return resample(self.sv(text), self.sv.sample_rate, self.sample_rate)
-        return self.en(text)
