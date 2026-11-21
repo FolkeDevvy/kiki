@@ -12,6 +12,10 @@ dependencies = [
     "httpx>=0.27",
 ]
 
+[project.optional-dependencies]
+# server-only extras (not installed on the Pi)
+server = ["trafilatura>=2.0"]
+
 [project.scripts]
 kiki = "kiki.cli:main"
 

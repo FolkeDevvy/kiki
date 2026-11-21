@@ -42,6 +42,13 @@ SCRIPTS["svenska"] = [
     ("anna", "Kiki, what's the capital of Denmark?", 5.0),
     ("sara", "Kiki, vilket år föll Berlinmuren?", 5.0),
 ]
+SCRIPTS["lookup"] = [
+    ("anna", "Kiki, what's the weather going to be like in Stockholm tomorrow?", 3.0),
+    ("sara", "Anna, ska vi gå på bio ikväll?", 1.0),
+    ("anna", "Sure, which movie?", 1.5),
+    ("sara", "Kiki, vad är huvudstaden i Norge?", 5.0),
+    ("sara", "Jag vet inte vilken film, vi får se.", 40.0),
+]
 SCRIPTS["manners"] = [
     ("anna", "Kiki, don't respond to the next thing I say.", 2.5),
     ("anna", "There's a lot of apples in the garden this year.", 3.0),

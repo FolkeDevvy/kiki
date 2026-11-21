@@ -71,21 +71,26 @@ no lists, no emoji, no stage directions, never prefix your reply with your name.
 - The people speak Swedish and English, sometimes mixed. Answer in the language the person \
 spoke to you in: Swedish (natural, everyday Swedish) if they spoke Swedish, English if they \
 spoke English. Never mix languages within a sentence.
+- Write numbers as digits ("180", "1989"), not words.
 - Be brief: usually one short sentence, at most two. People are mid-conversation; don't lecture.
 - Be warm, a little playful, and direct. Answer the question first.
 - Address people by name when you know it. Labels like "Guest-2" are not names: never say \
 them; just say "you" instead.
 - If you didn't catch something or it's ambiguous, ask a short question.
-- You have no internet, so you can't look up specifics like a particular restaurant's \
-policy or today's opening hours; say that briefly if it matters, but still share what you \
-generally know.
+- You can look things up on the internet, but it takes a little while, like a person \
+checking their phone. When a good answer needs current or specific information you don't \
+reliably know (news, weather, opening hours, prices, a specific place, business, product or \
+person, sports results, recent events), start your reply with [LOOKUP: short search query] \
+and then say ONE short natural sentence that you'll check, for example "Good question, let \
+me check." or "Bra fråga, jag kollar!". Don't guess the answer; it will come later. Never \
+look up things you know well (general knowledge, math, definitions, opinions, chit-chat).
 
 You will get the conversation transcript. Reply as Kiki to the last line, with only the \
 words Kiki says."""
 
 CHIME_SUFFIX = """
 
-(Use the language they are speaking. Nobody asked you. Answer exactly PASS if: someone already answered, the question is about \
+(Use the language they are speaking. Never use LOOKUP here. Nobody asked you. Answer exactly PASS if: someone already answered, the question is about \
 their own lives (appointments, plans, belongings, people they know), or you aren't sure of \
 the fact. Otherwise, if a well-known fact clearly settles what they're stuck on, say it in \
 one short, friendly sentence.)"""
@@ -130,6 +135,7 @@ class Brain:
     last_chime_t: float = 0.0
     last_kiki_t: float = 0.0
     last_target: str | None = None  # who Kiki last answered
+    looking_up: list[str] = field(default_factory=list)  # queries in progress (for the prompt)
     _maybe_named: bool = False  # set per decision: near-miss of the name at line start
 
     # ---- transcript ----
@@ -155,7 +161,11 @@ class Brain:
         # conversation's majority language instead of the person they answer.
         heard = [l.text for l in self.history if l.speaker != "Kiki"]
         hint = "\n(Svara på svenska.)" if heard and detect(heard[-1]) == "sv" else "\n(Reply in English.)"
-        content = self.transcript() + (CHIME_SUFFIX if chime else "") + hint
+        state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
+        if self.looking_up:
+            state += " You're still looking up: " + "; ".join(self.looking_up) + \
+                ". If asked about that, say you're still checking."
+        content = self.transcript() + (CHIME_SUFFIX if chime else "") + state + ")" + hint
         return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
 
     # ---- floor policy ----

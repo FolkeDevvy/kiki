@@ -1,0 +1,18 @@
+# SearXNG for Kiki: internal-only meta search with the JSON API enabled.
+use_default_settings: true
+general:
+  instance_name: kiki-search
+server:
+  # SEARXNG_SECRET env var overrides this; the service is not exposed outside compose
+  secret_key: "kiki-internal-only-change-me"
+  limiter: false          # only Kiki's server talks to it
+  public_instance: false
+  image_proxy: false
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+outgoing:
+  request_timeout: 3.0
+  max_request_timeout: 6.0

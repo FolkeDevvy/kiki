@@ -175,6 +175,15 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
    - `scripts/eval_gate.py`: 29/30 scenarios. Known miss: chiming in on someone's
      personal schedule.
    - Still to do: barge-in, and voice control of the proactivity level.
+4b. **Web lookups in the background.** ✅ first version:
+   - Self-hosted SearXNG; trafilatura reads the top 3 pages.
+   - The responder starts its reply with `[LOOKUP: query]` plus a spoken "let me
+     check" (10/10 correct decisions in `scripts/eval_lookup.py`). As a safety net,
+     a promise to check without the marker also starts a lookup.
+   - Research runs on its own LLM slot (~18 s on the laptop), and the answer is
+     delivered at the next pause in the conversation.
+   - Known cost on the laptop: while it researches, turn decisions take 3–6 s
+     instead of ~1 s (CPU contention). The A4000 fixes this.
 5. **Personality and memory:** persona, per-person memory (SQLite), local tools.
 6. **Tuning:** label logged decisions, build an eval set, tune the gate. Move the
    server to the A4000 box.

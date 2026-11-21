@@ -30,7 +30,8 @@ services:
     environment:
       HOME: /tmp
       KIKI_LLM_URL: http://llm:8080
-    depends_on: [llm]
+      KIKI_SEARCH_URL: http://search:8080
+    depends_on: [llm, search]
     ports:
       - "8765:8765"  # the Pi connects here
       # diagnostics page/API: serves room recordings, so localhost-only by default.
@@ -48,6 +49,16 @@ services:
       - ./scripts:/app/scripts:ro
       - /run/user/${UID:-1000}/pulse:/run/user/${UID:-1000}/pulse
 
+  # Self-hosted meta search (SearXNG) for Kiki's lookups. Internal only: no ports.
+  # Queries go out to public engines (DuckDuckGo, Wikipedia, ...) without accounts.
+  search:
+    image: searxng/searxng:2026.11.20-cd6d28091
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${KIKI_SEARCH_SECRET:-kiki-internal-only}
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+
   # Local LLM (OpenAI-compatible API, llm:8080 inside the compose network).
   # Laptop: CPU build. The Radeon 680M via Vulkan was ~30% faster but hung the GPU
   # repeatedly under load ("device wedged", amdgpu reset), so it's off.
@@ -57,7 +68,9 @@ services:
     restart: unless-stopped
     # --no-mmproj: text only. --swa-full: keep a full KV cache for sliding-window
     # models (Gemma) so prompt-cache reuse works; no effect on other models.
-    command: ["--no-mmproj", "--swa-full"]
+    # -b/-ub 128: process long prompts (web research) in small steps so live
+    # replies and turn decisions on the other slots aren't blocked for seconds.
+    command: ["--no-mmproj", "--swa-full", "-b", "128", "-ub", "128"]
     environment:
       LLAMA_CACHE: /models/llm
       # Gemma 4 E4B: much better Swedish than Qwen3-4B at the same speed; with
@@ -67,7 +80,7 @@ services:
       LLAMA_ARG_HF_REPO: ${KIKI_LLM_REPO:-unsloth/gemma-4-E4B-it-GGUF:Q4_K_M}
       LLAMA_ARG_CTX_SIZE: "16384"
       LLAMA_ARG_THREADS: "${KIKI_LLM_THREADS:-6}"  # 8 physical cores: leave room for TTS/STT
-      LLAMA_ARG_N_PARALLEL: "2"  # responder + gate at the same time
+      LLAMA_ARG_N_PARALLEL: "3"  # responder, gate, background research
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_PORT: "8080"
       LLAMA_ARG_REASONING: "off" # spoken replies need low latency, not thinking

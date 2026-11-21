@@ -27,6 +27,7 @@ from kiki.server.diagnostics import Diagnostics
 from kiki.server.diagnostics import serve as serve_diagnostics
 from kiki.server.gate import Gate
 from kiki.server.lang import detect
+from kiki.server.research import Lookup, Researcher, promised_lookup, query_from_question, split_lookup
 from kiki.server.llm import LLM
 from kiki.server.speakers import Embedder, Registry
 from kiki.server.speech import sentences
@@ -76,6 +77,7 @@ class Models:
         self.tts = Voice(s.models_dir, en_voice=s.kiki_voice, sv_voice=s.kiki_voice_sv)
         self.llm = LLM(s.llm_url)
         self.gate = Gate(s.llm_url, slot=GATE_SLOT)
+        self.research = Researcher(s.search_url, self.llm) if s.search_url else None
         # TTS gets its own thread so replies never queue behind transcription
         self.tts_pool = ThreadPoolExecutor(max_workers=1)
         # first inference allocates buffers and is ~2x slower; pay that now
@@ -105,6 +107,10 @@ class Session:
         self._reply: asyncio.Task | None = None
         self._warm: asyncio.Task | None = None
         self._bg: set[asyncio.Task] = set()
+        # floor tracking, so background answers wait for a pause
+        self._speech_active = False
+        self._last_turn_end = 0.0
+        self._last_kiki_end = 0.0
         log_dir.mkdir(parents=True, exist_ok=True)
         self._log = (log_dir / f"session-{time.strftime('%Y%m%d-%H%M%S')}.jsonl").open("a")
 
@@ -127,7 +133,11 @@ class Session:
             elif kind == "stats":
                 ev.pop("type", None)
                 self.diag.edge_stats(self.edge, ev)
+            elif kind == "speech_started":
+                self._speech_active = True
             elif kind == "turn_end":
+                self._speech_active = False
+                self._last_turn_end = time.monotonic()
                 self._jobs.put_nowait(("turn_end", ev, time.perf_counter()))
             elif kind == "hello":
                 self.edge = str(ev.get("device", "?"))
@@ -184,7 +194,7 @@ class Session:
         spec: asyncio.Task | None = None
         if self.brain.likely_reply(turn.text) and not self._replying():
             # speculative: generate while the gate thinks; audio waits for its verdict
-            spec = self._reply = asyncio.create_task(self._speak(decision, received, chime=False))
+            spec = self._reply = asyncio.create_task(self._speak(decision, received, chime=False, question=turn.text))
         d = await decision
         how = "timeout" if turn.forced else "smart-turn"
         gate_ms = f", gate {d.verdict.ms:.0f} ms" if d.verdict else ""
@@ -203,12 +213,12 @@ class Session:
             if spec is not None:
                 spec.cancel()  # a chime-in uses its own (PASS-able) prompt
             if not self._replying() or self._reply is spec:
-                self._reply = asyncio.create_task(self._speak(decision, received, chime=True))
+                self._reply = asyncio.create_task(self._speak(decision, received, chime=True, question=turn.text))
         elif d.action == "reply" and spec is None:
             if self._replying():
                 print("[server] already replying; skipping", flush=True)
             else:
-                self._reply = asyncio.create_task(self._speak(decision, received, chime=False))
+                self._reply = asyncio.create_task(self._speak(decision, received, chime=False, question=turn.text))
         elif not d.respond:
             self._prewarm()
 
@@ -219,7 +229,7 @@ class Session:
             return  # one in flight is enough; the next turn will catch up
         self._warm = asyncio.create_task(self.m.llm.prewarm(self.brain.messages(), slot=RESPONDER_SLOT))
 
-    async def _speak(self, decision: asyncio.Task, received: float, chime: bool) -> None:
+    async def _speak(self, decision: asyncio.Task, received: float, chime: bool, question: str = "") -> None:
         """Stream LLM -> sentences -> TTS -> edge. Nothing is sent until the gate
         has approved; a chime-in may still be declined by the responder (PASS)."""
         assert self.ws is not None
@@ -229,10 +239,15 @@ class Session:
         first_audio: float | None = None
         marks: dict[str, float] = {"start": time.perf_counter() - received}
 
-        async def deltas():
+        lookup_query: list[str] = []
+
+        async def raw():
             async for d in self.brain.llm.stream(self.brain.messages(chime=chime), slot=RESPONDER_SLOT):
                 marks.setdefault("token", time.perf_counter() - received)
                 yield d
+
+        def deltas():
+            return raw() if chime else split_lookup(raw(), lookup_query.append)
 
         # ambiguous sentences ("1990.") are spoken in the language Kiki was addressed in
         heard = [l.text for l in self.brain.history if l.speaker != "Kiki"]
@@ -264,6 +279,7 @@ class Session:
             text = " ".join(said)
             if said:
                 await self.ws.send(dumps("say_end", id=say_id, text=text))
+                self._last_kiki_end = time.monotonic()
         except asyncio.CancelledError:
             if said:  # cut off mid-reply: close the say so the edge isn't left hanging
                 await self.ws.send(dumps("say_end", id=say_id, text=" ".join(said)))
@@ -276,6 +292,13 @@ class Session:
         if text:
             self.brain.said(text, chime=chime, target=None if chime else d.target)
             self._prewarm()
+        if not question:
+            heard = [l for l in self.brain.history if l.speaker != "Kiki"]
+            question = heard[-1].text if heard else ""
+        if not lookup_query and not chime and text and promised_lookup(text) and question:
+            lookup_query.append(query_from_question(question))  # promised to check, forgot the marker
+        if lookup_query:
+            self._start_lookup(Lookup(lookup_query[0], question or lookup_query[0], lang_default, d.target))
             breakdown = " ".join(f"{k}={v * 1000:.0f}" for k, v in marks.items())
             fa = f"{first_audio * 1000:.0f} ms" if first_audio is not None else "n/a"
             print(f"          [Kiki] {text}   (first audio {fa}; {breakdown} ms)", flush=True)
@@ -283,6 +306,72 @@ class Session:
             self.diag.reply(self.edge, {"text": text, "chime": chime,
                                         "marks": {k: round(v * 1000) for k, v in marks.items()},
                                         "first_audio_ms": round(first_audio * 1000) if first_audio else None})
+
+    # ---- background lookups -------------------------------------------------------
+    def _start_lookup(self, lk: Lookup) -> None:
+        print(f"          [Kiki] (looking up: {lk.query!r})", flush=True)
+        self.brain.looking_up.append(lk.query)
+        task = asyncio.create_task(self._lookup(lk))
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    async def _lookup(self, lk: Lookup) -> None:
+        try:
+            if self.m.research is None:
+                lk.answer = ("Jag kan inte söka på nätet just nu." if lk.language == "sv"
+                             else "I can't search the web right now.")
+            else:
+                await self.m.research.run(lk, self.brain.transcript())
+            src = ", ".join(s.site for s in lk.sources[:3])
+            print(f"          [Kiki] (lookup done in {time.time() - lk.started:.0f}s via {src or '-'}"
+                  f"{'; error ' + lk.error if lk.error else ''})", flush=True)
+            await self._wait_for_floor()
+            await self._say_text(lk.answer, lk.language, target=lk.asker)
+            self.diag.reply(self.edge, {"text": lk.answer, "lookup": lk.query,
+                                        "sources": [s.url for s in lk.sources[:3]],
+                                        "seconds": round(time.time() - lk.started, 1), "error": lk.error})
+            self._write({"kind": "lookup", "query": lk.query, "answer": lk.answer, "error": lk.error,
+                         "sources": [s.url for s in lk.sources[:5]], "timings": lk.timings})
+        finally:
+            if lk.query in self.brain.looking_up:
+                self.brain.looking_up.remove(lk.query)
+
+    async def _wait_for_floor(self, max_wait_s: float = 120.0) -> None:
+        """Wait for a natural gap: nobody talking, Kiki not talking, a beat after both."""
+        deadline = time.monotonic() + max_wait_s
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if (not self._speech_active and not self._replying()
+                    and now - self._last_turn_end > 1.0 and now - self._last_kiki_end > 0.8):
+                return
+            await asyncio.sleep(0.2)
+
+    async def _say_text(self, text: str, lang: str, target: str | None) -> None:
+        """Speak a ready-made text (no LLM), sentence by sentence."""
+        assert self.ws is not None
+        loop = asyncio.get_running_loop()
+        say_id = uuid.uuid4().hex[:8]
+
+        async def once():
+            yield text
+
+        said: list[str] = []
+        try:
+            async for sentence in sentences(once()):
+                audio = await loop.run_in_executor(self.m.tts_pool, lambda: self.m.tts(sentence, default=lang))
+                if not said:
+                    await self.ws.send(dumps("say", id=say_id, sample_rate=self.m.tts.sample_rate))
+                await self.ws.send((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+                said.append(sentence)
+            if said:
+                await self.ws.send(dumps("say_end", id=say_id, text=" ".join(said)))
+                self._last_kiki_end = time.monotonic()
+        except ConnectionClosed:
+            return
+        if said:
+            self.brain.said(" ".join(said), target=target)
+            self._prewarm()
+            print(f"          [Kiki] {' '.join(said)}   (lookup answer)", flush=True)
 
     def _write(self, rec: dict) -> None:
         self._log.write(json.dumps(rec) + "\n")

@@ -39,6 +39,9 @@ class Settings:
     # re-tune with real voices from the Pi mic.
     speaker_threshold: float = float(_env("KIKI_SPEAKER_THRESHOLD", "0.68"))
 
+    # Web lookups via self-hosted SearXNG; empty disables them
+    search_url: str = _env("KIKI_SEARCH_URL", "")
+
     # LLM (llama.cpp server, OpenAI-compatible)
     llm_url: str = _env("KIKI_LLM_URL", "http://localhost:8081")
     # Responder

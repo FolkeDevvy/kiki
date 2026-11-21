@@ -14,7 +14,7 @@ ENV UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH 
     PYTHONUNBUFFERED=1 KIKI_MODELS_DIR=/app/models
 WORKDIR /app
 
-ARG UV_GROUPS="--group dev"
+ARG UV_GROUPS="--group dev --extra server"
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-install-project $UV_GROUPS
 COPY . .
