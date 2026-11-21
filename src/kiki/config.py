@@ -28,6 +28,8 @@ class Settings:
 
     # Turn detection. "auto" = int8 model on x86, fp32 on ARM; or a file name in models/
     smart_turn_model: str = _env("KIKI_SMART_TURN_MODEL", "auto")
+    # CPU threads per Smart Turn call; 0 = all cores. The Pi uses 2 (compose.pi.yaml)
+    smart_turn_threads: int = int(_env("KIKI_SMART_TURN_THREADS", "0"))
     turn_threshold: float = float(_env("KIKI_TURN_THRESHOLD", "0.5"))
     # If Smart Turn keeps saying "incomplete", end the turn anyway after this much silence
     max_pause_ms: int = int(_env("KIKI_MAX_PAUSE_MS", "2000"))

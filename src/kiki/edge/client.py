@@ -29,7 +29,7 @@ ECHO_TAIL_S = 0.4  # keep ignoring the mic briefly after playback (room reverb)
 def _smart_turn_path(s: Settings) -> Path:
     """Preferred Smart Turn build for this CPU, else whichever one is present."""
     want = models.smart_turn_file(s.smart_turn_model)
-    for name in (want, "smart-turn-v3.2-gpu.onnx", "smart-turn-v3.2-cpu.onnx"):
+    for name in (want, "smart-turn-v3.2-cpu.onnx", "smart-turn-v3.2-gpu.onnx"):
         if (s.models_dir / name).exists():
             if name != want:
                 print(f"[edge] {want} missing; using {name}", flush=True)
@@ -44,7 +44,7 @@ def build_segmenter(s: Settings) -> Segmenter:
     except Exception as e:
         print(f"[edge] couldn't fetch missing models ({e!r}); using what's on disk", flush=True)
     vad = SileroVad(models.path(s.models_dir, "silero_vad.onnx"))
-    turn = SmartTurn(_smart_turn_path(s))
+    turn = SmartTurn(_smart_turn_path(s), threads=s.smart_turn_threads)
     return Segmenter(s, vad, turn)
 
 

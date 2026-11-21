@@ -22,6 +22,7 @@ services:
       - audio
     environment:
       HOME: /tmp
+      KIKI_SMART_TURN_THREADS: "2"  # smaller CPU bursts: the Pi browns out on full-core spikes
     volumes:
       - ./models:/app/models
       - ./recordings:/app/recordings

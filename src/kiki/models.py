@@ -25,10 +25,10 @@ class Model:
 MODELS = [
     # MIT
     Model("silero_vad.onnx", "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx", "edge"),
-    # BSD-2. int8 build: fast on x86. fp32 build (published as "-gpu", runs fine on
-    # CPU): use on ARM, where onnxruntime's int8 conv kernels are extremely slow.
+    # BSD-2. int8 build (default everywhere) and the fp32 build (published as "-gpu",
+    # runs on CPU too; not fetched by default).
     Model("smart-turn-v3.2-cpu.onnx", "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx?download=true", "edge"),
-    Model("smart-turn-v3.2-gpu.onnx", "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-gpu.onnx?download=true", "edge"),
+    Model("smart-turn-v3.2-gpu.onnx", "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-gpu.onnx?download=true", "extra"),
     # NVIDIA Parakeet TDT 0.6B v2 (English), int8, CC-BY-4.0
     Model("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8", f"{SHERPA}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2", "server", archive=True),
     # Parakeet TDT 0.6B v3: 25 European languages incl. Swedish, auto language detection
@@ -43,13 +43,12 @@ MODELS = [
 
 
 def smart_turn_file(setting: str = "auto") -> str:
-    """Which Smart Turn build to use: int8 on x86, fp32 on ARM (Pi)."""
+    """Which Smart Turn build to use. int8 everywhere: it ran fine on the Pi in
+    practice and is the lighter load (an earlier "int8 is slow on ARM" theory
+    was really the Pi browning out). The fp32 file stays available by name."""
     if setting != "auto":
         return setting
-    import platform
-
-    arm = platform.machine().lower() in ("aarch64", "arm64", "armv7l")
-    return "smart-turn-v3.2-gpu.onnx" if arm else "smart-turn-v3.2-cpu.onnx"
+    return "smart-turn-v3.2-cpu.onnx"
 
 
 def path(models_dir: Path, name: str) -> Path:

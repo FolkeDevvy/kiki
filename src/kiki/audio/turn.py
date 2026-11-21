@@ -22,10 +22,12 @@ def fit_to_window(audio: np.ndarray, seconds: int = MAX_SECONDS) -> np.ndarray:
 
 
 class SmartTurn:
-    def __init__(self, model_path: Path) -> None:
+    def __init__(self, model_path: Path, threads: int = 0) -> None:
         so = ort.SessionOptions()
         so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         so.inter_op_num_threads = 1
+        if threads > 0:
+            so.intra_op_num_threads = threads  # cap the CPU burst per call (Pi power budget)
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self._sess = ort.InferenceSession(str(model_path), sess_options=so, providers=["CPUExecutionProvider"])
         self._input = self._sess.get_inputs()[0].name
