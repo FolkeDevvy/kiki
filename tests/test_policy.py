@@ -112,3 +112,26 @@ def test_contextual_mode_names_and_stuck_moments_go_to_claude():
     b.said("Pasta? Do you have tomatoes?", target="Anna")
     b.hear("Anna", "Yeah, we have some.")
     assert b.apply(v("silent", 1.0), "Anna", named=False).unsure  # answering Kiki's question
+
+
+def test_gate_window_moves_in_steps_so_the_cache_survives():
+    b = Brain(llm=None, gate=None)
+    starts = []
+    for i in range(60):
+        b.hear("Anna", f"line {i}")
+        starts.append(b.gate_transcript().split("\n")[0])
+    changes = sum(1 for a, c in zip(starts, starts[1:]) if a != c)
+    assert changes <= 60 // 8 + 1  # the prefix changes once per 8 lines, not every line
+    assert len(b.gate_transcript().split("\n")) <= 20
+
+
+async def test_gate_failure_in_claude_mode_uses_context():
+    class Broken:
+        async def judge(self, *a, **k):
+            raise TimeoutError
+
+    b = Brain(llm=None, gate=Broken())
+    b.allow_unsure = True
+    b.hear("Folke", "Do you think I should buy a million dollars for a million dollars?")
+    d = await b.decide("Folke", "Do you think I should buy a million dollars for a million dollars?")
+    assert d.action == "reply" and d.unsure  # a question: Claude still gets to decide

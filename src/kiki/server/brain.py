@@ -197,6 +197,14 @@ class Brain:
         recent = self.history[-self.history_turns :]
         return "\n".join(f"[{l.speaker}]: {l.text}" for l in recent)
 
+    def gate_transcript(self, keep: int = 12, step: int = 8) -> str:
+        """Recent lines for the gate, with a window start that only moves every `step`
+        lines. A window sliding by one line per turn changes the prompt prefix every
+        time and defeats llama.cpp's cache (10-14 s per check on the laptop CPU)."""
+        n = len(self.history)
+        start = max(0, ((n - keep) // step) * step) if n > keep else 0
+        return "\n".join(f"[{l.speaker}]: {l.text}" for l in self.history[start:])
+
     def messages(self, chime: bool = False) -> list[dict]:
         # Append-only on purpose: each new line only extends the prompt, so
         # llama.cpp's KV cache (kept warm by prewarm) covers everything before it.
@@ -257,8 +265,11 @@ class Brain:
         try:
             # No quiet-mode hint for the gate: it made the small model answer "quiet"
             # to everything. The policy below enforces quiet mode itself.
-            v = await self.gate.judge(self.transcript())
+            v = await self.gate.judge(self.gate_transcript())
         except Exception as e:
+            if self.allow_unsure:  # Claude decides anyway: judge from context alone
+                print(f"[brain] gate failed ({e!r}); deciding from context", flush=True)
+                return self.apply(Verdict("silent", {}), speaker, named)
             print(f"[brain] gate failed ({e!r}); falling back to the name rule", flush=True)
             return Decision("reply" if named else "silent", "gate failed: name rule", speaker, named=named)
         return self.apply(v, speaker, named)

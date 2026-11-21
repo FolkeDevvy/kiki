@@ -77,7 +77,7 @@ class Models:
         self.embed = Embedder(s.models_dir)
         self.tts = Kokoro(s.models_dir, voice=s.kiki_voice)
         self.llm = LLM(s.llm_url)
-        self.gate = Gate(s.llm_url, slot=GATE_SLOT)
+        self.gate = Gate(s.llm_url, slot=GATE_SLOT, timeout=4.0)
         self.research = Researcher(s.search_url, self.llm) if s.search_url else None
         self.use_claude = s.brain == "claude" and claude_brain.available()
         if s.brain == "claude" and not self.use_claude:
@@ -314,7 +314,15 @@ class Session:
             async for sentence in sentences(deltas()):
                 marks.setdefault("chunk", time.perf_counter() - received)
                 if not said:
-                    d = await decision
+                    if self.claude is not None and not decision.done():
+                        # Claude makes the real call; don't hold audio for a slow local gate
+                        # beyond a moment (it only matters for "be quiet" requests)
+                        try:
+                            d = await asyncio.wait_for(asyncio.shield(decision), timeout=0.3)
+                        except TimeoutError:
+                            d = Decision("reply", "gate slow; Claude decided", None, unsure=True)
+                    else:
+                        d = await decision
                     marks.setdefault("gate", time.perf_counter() - received)
                     wanted = "chime" if chime else "reply"
                     if d.action != wanted:
