@@ -20,6 +20,7 @@ x-kiki: &kiki
     - ./data:/app/data
     - ./recordings:/app/recordings
     - ./src:/app/src:ro
+    - ./scripts:/app/scripts:ro
     - ./tests:/app/tests:ro
 
 services:

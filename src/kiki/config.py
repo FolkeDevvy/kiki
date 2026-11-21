@@ -41,7 +41,9 @@ class Settings:
     llm_url: str = _env("KIKI_LLM_URL", "http://localhost:8081")
     # Responder
     kiki_voice: str = _env("KIKI_VOICE", "af_heart")
-    engagement_window_s: float = float(_env("KIKI_ENGAGEMENT_WINDOW_S", "20"))
+    engagement_window_s: float = float(_env("KIKI_ENGAGEMENT_WINDOW_S", "30"))
+    # 0 = only when addressed, 1 = occasional chime-ins (default), 2 = eager
+    proactivity: int = int(_env("KIKI_PROACTIVITY", "1"))
     history_turns: int = int(_env("KIKI_HISTORY_TURNS", "40"))
 
     # Audio device (sounddevice name or index); empty = system default

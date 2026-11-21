@@ -92,6 +92,12 @@ class Registry:
         self.save()
         return v
 
+    def reset_guests(self) -> None:
+        """Forget unnamed voices (they're only meaningful within one conversation)."""
+        self.voices = [v for v in self.voices if v.enrolled]
+        self.merged.clear()
+        self._guests = 0
+
     def rename(self, old: str, new: str) -> bool:
         """Name a guest (or fix a name) and persist the voiceprint."""
         for v in self.voices:

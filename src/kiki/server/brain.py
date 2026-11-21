@@ -1,32 +1,39 @@
 """Deciding when Kiki talks, and what it says.
 
-Milestone 2: Kiki replies when its name is said, or when the person it just
-talked to follows up within the engagement window. The LLM gate for proactive
-remarks comes in milestone 4 and plugs into `Brain.decide`.
+Floor policy per finished turn:
+  1. The gate (local LLM, one-word verdict + probabilities) judges the newest line.
+  2. Code checks the verdict against things it can verify:
+     - "reply" without Kiki's name only counts if Kiki spoke in the last few lines
+       and the gate is confident;
+     - "chime" needs proactivity on, enough probability, a cooldown, no quiet mode,
+       and then the responder itself may still decline with PASS;
+     - "quiet" mutes chime-ins and follow-ups for a while (the name still works).
+  3. If the gate is unavailable, fall back to: reply only when named.
 """
 
 from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from kiki.server.gate import Gate, Verdict
 from kiki.server.llm import LLM
 
 # STT spellings of "Kiki" seen in practice (Parakeet mostly gets it right)
 NAME = re.compile(r"\b(kiki|kikki|kiky|keeki|kikí|kicky|kiki's)\b", re.IGNORECASE)
 
 PERSONA = """You are Kiki, a small voice assistant sitting on a table among a group of people. \
-You hear the conversation through a microphone; the transcript below shows who said what as \
-[Name]: text. Names like Guest-1 are people whose names you don't know yet. Your own past \
-lines are marked [Kiki].
+You hear the conversation through a microphone; the transcript shows who said what as \
+[Name]: text. Your own past lines are marked [Kiki].
 
 How you talk:
 - You are spoken aloud by a text-to-speech voice. Write plain spoken English: no markdown, \
 no lists, no emoji, no stage directions, never prefix your reply with your name.
 - Be brief: usually one short sentence, at most two. People are mid-conversation; don't lecture.
 - Be warm, a little playful, and direct. Answer the question first.
-- Address people by name when you know it; never call anyone "Guest-1".
+- Address people by name when you know it. Labels like "Guest-2" are not names: never say \
+them; just say "you" instead.
 - If you didn't catch something or it's ambiguous, ask a short question.
 - You have no internet, so you can't look up specifics like a particular restaurant's \
 policy or today's opening hours; say that briefly if it matters, but still share what you \
@@ -34,6 +41,20 @@ generally know.
 
 You will get the conversation transcript. Reply as Kiki to the last line, with only the \
 words Kiki says."""
+
+CHIME_SUFFIX = """
+
+(Nobody asked you. Answer exactly PASS if: someone already answered, the question is about \
+their own lives (appointments, plans, belongings, people they know), or you aren't sure of \
+the fact. Otherwise, if a well-known fact clearly settles what they're stuck on, say it in \
+one short, friendly sentence.)"""
+
+# proactivity level -> (min P(chime), cooldown seconds between unprompted remarks)
+PROACTIVITY = {0: (2.0, 0.0), 1: (0.7, 120.0), 2: (0.5, 45.0)}
+
+ENGAGED_LINES = 3  # Kiki must have spoken within this many lines for an unnamed reply
+UNNAMED_REPLY_P = 0.85
+QUIET_S = 180.0
 
 
 @dataclass
@@ -45,42 +66,114 @@ class Line:
 
 @dataclass
 class Decision:
-    respond: bool
+    action: str  # reply | chime | silent | quiet
     reason: str
     target: str | None = None
+    verdict: Verdict | None = None
+    named: bool = False
+
+    @property
+    def respond(self) -> bool:
+        return self.action in ("reply", "chime")
 
 
+@dataclass
 class Brain:
-    def __init__(self, llm: LLM, engagement_window_s: float, history_turns: int) -> None:
-        self.llm = llm
-        self.window = engagement_window_s
-        self.history_turns = history_turns
-        self.history: list[Line] = []
-        self._last_kiki_t = 0.0
-        self._last_kiki_target: str | None = None
+    llm: LLM
+    gate: Gate | None
+    engagement_window_s: float = 30.0
+    history_turns: int = 40
+    proactivity: int = 1
+    history: list[Line] = field(default_factory=list)
+    quiet_until: float = 0.0
+    last_chime_t: float = 0.0
+    last_kiki_t: float = 0.0
+    last_target: str | None = None  # who Kiki last answered
 
+    # ---- transcript ----
     def hear(self, speaker: str, text: str) -> None:
         self.history.append(Line(speaker, text, time.time()))
 
-    def said(self, text: str, target: str | None) -> None:
-        self.history.append(Line("Kiki", text, time.time()))
-        self._last_kiki_t = time.time()
-        self._last_kiki_target = target
+    def said(self, text: str, chime: bool = False, target: str | None = None) -> None:
+        now = time.time()
+        self.history.append(Line("Kiki", text, now))
+        self.last_kiki_t = now
+        self.last_target = target
+        if chime:
+            self.last_chime_t = now
 
-    def decide(self, speaker: str, text: str) -> Decision:
-        if NAME.search(text):
-            return Decision(True, "name", speaker)
-        engaged = time.time() - self._last_kiki_t < self.window
-        if engaged and speaker == self._last_kiki_target:
-            return Decision(True, "engaged follow-up", speaker)
-        return Decision(False, "not addressed")
-
-    def messages(self) -> list[dict]:
+    def transcript(self) -> str:
         recent = self.history[-self.history_turns :]
+        return "\n".join(f"[{l.speaker}]: {l.text}" for l in recent)
+
+    def messages(self, chime: bool = False) -> list[dict]:
         # Append-only on purpose: each new line only extends the prompt, so
         # llama.cpp's KV cache (kept warm by prewarm) covers everything before it.
-        transcript = "\n".join(f"[{l.speaker}]: {l.text}" for l in recent)
-        return [
-            {"role": "system", "content": PERSONA},
-            {"role": "user", "content": transcript},
-        ]
+        content = self.transcript() + (CHIME_SUFFIX if chime else "")
+        return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
+
+    # ---- floor policy ----
+    @property
+    def quiet(self) -> bool:
+        return time.time() < self.quiet_until
+
+    def engaged(self) -> bool:
+        if time.time() - self.last_kiki_t > self.engagement_window_s:
+            return False
+        return any(l.speaker == "Kiki" for l in self.history[-(ENGAGED_LINES + 1) : -1])
+
+    def likely_reply(self, text: str) -> bool:
+        """Cheap pre-check used to start the responder speculatively."""
+        return bool(NAME.search(text)) or (self.engaged() and not self.quiet)
+
+    async def decide(self, speaker: str, text: str) -> Decision:
+        named = bool(NAME.search(text))
+        if self.gate is None:
+            return Decision("reply" if named else "silent", "no gate: name rule", speaker, named=named)
+        try:
+            # No quiet-mode hint for the gate: it made the small model answer "quiet"
+            # to everything. The policy below enforces quiet mode itself.
+            v = await self.gate.judge(self.transcript())
+        except Exception as e:
+            print(f"[brain] gate failed ({e!r}); falling back to the name rule", flush=True)
+            return Decision("reply" if named else "silent", "gate failed: name rule", speaker, named=named)
+        return self.apply(v, speaker, named)
+
+    def apply(self, v: Verdict, speaker: str, named: bool) -> Decision:
+        """Pure policy: gate verdict + verifiable context -> decision."""
+        min_p, cooldown = PROACTIVITY.get(self.proactivity, PROACTIVITY[1])
+        now = time.time()
+
+        if v.action == "quiet":
+            if not (named or self.engaged()):
+                return Decision("silent", "'quiet' but not said to Kiki", speaker, v, named)
+            self.quiet_until = now + QUIET_S
+            return Decision("quiet", "asked to be quiet", speaker, v, named)
+
+        if v.action == "reply":
+            if named:
+                self.quiet_until = 0.0  # being addressed by name ends quiet mode
+                return Decision("reply", "addressed by name", speaker, v, named)
+            if self.quiet:
+                return Decision("silent", "quiet mode", speaker, v, named)
+            if self.last_target is not None and speaker != self.last_target:
+                return Decision("silent", f"unnamed, and {speaker} isn't who Kiki answered", speaker, v, named)
+            if self.engaged() and v.p("reply") >= UNNAMED_REPLY_P:
+                return Decision("reply", f"follow-up (p={v.p('reply'):.2f})", speaker, v, named)
+            return Decision("silent", f"unnamed reply not trusted (p={v.p('reply'):.2f})", speaker, v, named)
+
+        if v.action == "chime":
+            if self.quiet:
+                return Decision("silent", "quiet mode", speaker, v, named)
+            if v.p("chime") < min_p:
+                return Decision("silent", f"chime too unsure (p={v.p('chime'):.2f})", speaker, v, named)
+            if now - self.last_chime_t < cooldown:
+                return Decision("silent", "chime cooldown", speaker, v, named)
+            return Decision("chime", f"chime (p={v.p('chime'):.2f})", None, v, named)
+
+        return Decision("silent", "gate: silent", speaker, v, named)
+
+
+def is_pass(text: str) -> bool:
+    """The responder declined a chime-in."""
+    return re.fullmatch(r"\W*pass\W*", text, re.IGNORECASE) is not None

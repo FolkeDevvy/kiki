@@ -164,8 +164,17 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
    first clause +0.6 s, TTS of that clause ~1.6 s under CPU contention). The Pi
    edge config is in `compose.pi.yaml`.
 3. **Who:** conversational naming, calibration on real voices, merge-aware history.
-4. **Manners:** floor policy (hard rules, engagement window, local gate,
-   speculative start), barge-in, decision logging.
+4. **Manners:** floor policy. ✅ first version:
+   - A local LLM gate (`server/gate.py`) gives a one-word verdict with probabilities
+     (reply / chime / silent / quiet), ~0.9 s on the laptop CPU.
+   - Code checks what it can verify: an unnamed reply needs Kiki to have spoken in
+     the last few lines, the same person, and p ≥ 0.85. A chime-in needs p ≥ 0.7, a
+     2-minute cooldown, and the responder not answering PASS. "Quiet" lasts 3 minutes
+     unless Kiki is addressed by name.
+   - The responder starts speculatively while the gate decides.
+   - `scripts/eval_gate.py`: 29/30 scenarios. Known miss: chiming in on someone's
+     personal schedule.
+   - Still to do: barge-in, and voice control of the proactivity level.
 5. **Personality and memory:** persona, per-person memory (SQLite), local tools.
 6. **Tuning:** label logged decisions, build an eval set, tune the gate. Move the
    server to the A4000 box.
