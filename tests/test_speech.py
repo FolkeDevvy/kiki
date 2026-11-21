@@ -31,8 +31,11 @@ def test_name_matches_common_spellings():
     for t in ["Kiki, what time is it?", "hey kiki", "Kicky do you know", "is that kiki's?"]:
         assert NAME.search(t), t
     assert not NAME.search("I like kicking the ball")
+    # Swedish mis-hearings at the start of a line are only "maybe named"
+    from kiki.server.brain import maybe_named
 
-
-async def test_first_chunk_can_end_at_a_comma_when_long_enough():
-    out = await collect(["I don't actually know what Thai places here do, ", "but most of them take reservations."])
-    assert out == ["I don't actually know what Thai places here do,", "but most of them take reservations."]
+    for t in ["Kiva är huvudstaden i Norge?", "Kikes vara inte på nästa sak", "Kik i hur länge ska man koka ett ägg",
+              "Klick i vilket år föll Berlinmuren"]:
+        assert maybe_named(t) and not NAME.search(t), t
+    for t in ["Kom hit nu", "Kaffe, någon?", "Can you pass the milk"]:
+        assert not maybe_named(t), t

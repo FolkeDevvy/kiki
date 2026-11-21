@@ -181,7 +181,17 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
 
 ## Decisions
 
-- **English only.**
+- **Swedish + English** (2026-11-21, replaces "English only"):
+  - Speech-to-text: Parakeet TDT v3 (25 languages, detects the language itself).
+  - Voice: Kokoro af_heart for English, Piper sv_SE Alma for Swedish, chosen per
+    sentence. MOSS-TTS-Nano (one voice for both) was tried and rejected on the laptop:
+    slower than real time, ran on past the end of sentences, and its Swedish was
+    partly unintelligible. Revisit one voice on the A4000.
+  - LLM: Gemma 4 E4B (much better Swedish than Qwen3-4B, same speed).
+  - Kiki answers in the language it was addressed in; the gate handles Swedish.
+  - A near-miss of the name at the start of a line ("Kik i…") counts only with a
+    confident gate.
+- **All voices female:** Kiki's own voices and every synthetic test speaker.
 - **Fully self-hosted:** no cloud STT/TTS/LLM, and no Claude (2026-11-21). This
   replaces the earlier cloud plan (AssemblyAI / Claude / cloud TTS).
 - **Proactive from day one,** with a threshold, a cooldown, and voice controls.

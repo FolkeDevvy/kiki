@@ -56,6 +56,15 @@ S = [
     (["[Bob]: Who called you earlier?", "[Anna]: Hmm, I can't remember."], {"silent"}),
     (["[Anna]: How far is it from Stockholm to Gothenburg?", "[Bob]: I don't know, far."], {"chime"}),
     (["[Bob]: What year did the Berlin wall fall?", "[Anna]: Eighty-something?"], {"chime"}),
+    # --- Swedish ---
+    (["[Folke]: Kiki, svara inte på nästa sak jag säger.", "[Folke]: Det finns jättemånga äpplen i trädgården."], {"silent"}),
+    (["[Anna]: Kiki, vad är huvudstaden i Norge?"], {"reply"}),
+    (["[Folke]: Kiki, vad är huvudstaden i Sverige?", "[Kiki]: Stockholm.", "[Folke]: Och i Finland?"], {"reply"}),
+    (["[Anna]: Ska vi äta pizza ikväll?", "[Bob]: Ja, gärna."], {"silent"}),
+    (["[Bob]: Kiki, var tyst en stund."], {"quiet"}),
+    (["[Anna]: Kiki är faktiskt ganska smart."], {"silent"}),
+    (["[Anna]: Hur högt är Kebnekaise nu igen?", "[Bob]: Ingen aning, runt tvåtusen meter?"], {"chime"}),
+    (["[Folke]: Kiki, what's the weather like in Gothenburg usually?", "[Kiki]: Mild and rainy.", "[Folke]: Okej, tack. Anna, ska vi gå?"], {"silent"}),
 ]
 
 

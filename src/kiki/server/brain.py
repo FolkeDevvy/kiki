@@ -18,10 +18,48 @@ import time
 from dataclasses import dataclass, field
 
 from kiki.server.gate import Gate, Verdict
+from kiki.server.lang import detect
 from kiki.server.llm import LLM
 
-# STT spellings of "Kiki" seen in practice (Parakeet mostly gets it right)
-NAME = re.compile(r"\b(kiki|kikki|kiky|keeki|kikí|kicky|kiki's)\b", re.IGNORECASE)
+# STT spellings of "Kiki" seen in practice (Parakeet mostly gets it right in English)
+_NAME_EXACT = re.compile(r"\b(kiki|kikki|kiky|keeki|kikí|kicky|kiki's)\b", re.IGNORECASE)
+_WORDS = re.compile(r"[a-zåäöéí']+", re.IGNORECASE)
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def named(text: str) -> bool:
+    """Kiki's name, spelled the way STT usually writes it."""
+    return bool(_NAME_EXACT.search(text))
+
+
+def maybe_named(text: str) -> bool:
+    """A near-miss of the name at the start of the line ("Kiva", "Kikes", "Kik i",
+    "Klick i" from Swedish speech). Weak evidence: also matches "Kids...", so the
+    policy only trusts it together with a confident gate."""
+    if named(text):
+        return True
+    w = [x.lower() for x in _WORDS.findall(text)[:2]]
+    candidates = w[:1] + (["".join(w)] if len(w) == 2 and len(w[1]) <= 2 else [])
+    return any(c.startswith("k") and 3 <= len(c) <= 6 and _edit_distance(c, "kiki") <= 2 for c in candidates)
+
+
+class _NameMatcher:
+    """Keeps `NAME.search(text)` working for existing callers (exact names only)."""
+
+    def search(self, text: str) -> bool:
+        return named(text)
+
+
+NAME = _NameMatcher()
 
 PERSONA = """You are Kiki, a small voice assistant sitting on a table among a group of people. \
 You hear the conversation through a microphone; the transcript shows who said what as \
@@ -30,6 +68,9 @@ You hear the conversation through a microphone; the transcript shows who said wh
 How you talk:
 - You are spoken aloud by a text-to-speech voice. Write plain spoken English: no markdown, \
 no lists, no emoji, no stage directions, never prefix your reply with your name.
+- The people speak Swedish and English, sometimes mixed. Answer in the language the person \
+spoke to you in: Swedish (natural, everyday Swedish) if they spoke Swedish, English if they \
+spoke English. Never mix languages within a sentence.
 - Be brief: usually one short sentence, at most two. People are mid-conversation; don't lecture.
 - Be warm, a little playful, and direct. Answer the question first.
 - Address people by name when you know it. Labels like "Guest-2" are not names: never say \
@@ -44,7 +85,7 @@ words Kiki says."""
 
 CHIME_SUFFIX = """
 
-(Nobody asked you. Answer exactly PASS if: someone already answered, the question is about \
+(Use the language they are speaking. Nobody asked you. Answer exactly PASS if: someone already answered, the question is about \
 their own lives (appointments, plans, belongings, people they know), or you aren't sure of \
 the fact. Otherwise, if a well-known fact clearly settles what they're stuck on, say it in \
 one short, friendly sentence.)"""
@@ -89,6 +130,7 @@ class Brain:
     last_chime_t: float = 0.0
     last_kiki_t: float = 0.0
     last_target: str | None = None  # who Kiki last answered
+    _maybe_named: bool = False  # set per decision: near-miss of the name at line start
 
     # ---- transcript ----
     def hear(self, speaker: str, text: str) -> None:
@@ -109,7 +151,11 @@ class Brain:
     def messages(self, chime: bool = False) -> list[dict]:
         # Append-only on purpose: each new line only extends the prompt, so
         # llama.cpp's KV cache (kept warm by prewarm) covers everything before it.
-        content = self.transcript() + (CHIME_SUFFIX if chime else "")
+        # The language hint goes last: small models otherwise follow the
+        # conversation's majority language instead of the person they answer.
+        heard = [l.text for l in self.history if l.speaker != "Kiki"]
+        hint = "\n(Svara på svenska.)" if heard and detect(heard[-1]) == "sv" else "\n(Reply in English.)"
+        content = self.transcript() + (CHIME_SUFFIX if chime else "") + hint
         return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
 
     # ---- floor policy ----
@@ -124,10 +170,11 @@ class Brain:
 
     def likely_reply(self, text: str) -> bool:
         """Cheap pre-check used to start the responder speculatively."""
-        return bool(NAME.search(text)) or (self.engaged() and not self.quiet)
+        return maybe_named(text) or (self.engaged() and not self.quiet)
 
     async def decide(self, speaker: str, text: str) -> Decision:
-        named = bool(NAME.search(text))
+        self._maybe_named = maybe_named(text)
+        named = NAME.search(text)
         if self.gate is None:
             return Decision("reply" if named else "silent", "no gate: name rule", speaker, named=named)
         try:
@@ -154,6 +201,9 @@ class Brain:
             if named:
                 self.quiet_until = 0.0  # being addressed by name ends quiet mode
                 return Decision("reply", "addressed by name", speaker, v, named)
+            if getattr(self, "_maybe_named", False) and v.p("reply") >= UNNAMED_REPLY_P:
+                self.quiet_until = 0.0
+                return Decision("reply", f"name probably mis-heard (p={v.p('reply'):.2f})", speaker, v, True)
             if self.quiet:
                 return Decision("silent", "quiet mode", speaker, v, named)
             if self.last_target is not None and speaker != self.last_target:

@@ -61,3 +61,12 @@ def test_unnamed_follow_up_must_come_from_who_kiki_answered():
     assert b.apply(v("reply", 0.99), "Bob", named=False).action == "silent"
     b.hear("Carl", "And thirteen times fifteen?")
     assert b.apply(v("reply", 0.99), "Carl", named=False).action == "reply"
+
+
+def test_misheard_name_needs_a_confident_gate():
+    b = brain("[Sara]: Kik i hur länge ska man koka ett ägg?")
+    b._maybe_named = True
+    assert b.apply(v("reply", 0.95), "Sara", named=False).action == "reply"
+    assert b.apply(v("reply", 0.6), "Sara", named=False).action == "silent"
+    b._maybe_named = True  # "Kids are asleep": the gate says silent, so silent
+    assert b.apply(v("silent", 1.0), "Sara", named=False).action == "silent"

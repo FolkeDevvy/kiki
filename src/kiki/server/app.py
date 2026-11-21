@@ -24,11 +24,12 @@ from kiki.config import SAMPLE_RATE, Settings
 from kiki.protocol import dumps
 from kiki.server.brain import Brain, Decision, is_pass
 from kiki.server.gate import Gate
+from kiki.server.lang import detect
 from kiki.server.llm import LLM
 from kiki.server.speakers import Embedder, Registry
 from kiki.server.speech import sentences
 from kiki.server.stt import Parakeet
-from kiki.server.tts import Kokoro
+from kiki.server.tts import Voice
 
 
 @dataclass
@@ -68,15 +69,16 @@ GATE_SLOT = 1
 class Models:
     def __init__(self, s: Settings) -> None:
         t = time.perf_counter()
-        self.stt = Parakeet(s.models_dir)
+        self.stt = Parakeet(s.models_dir, version=s.stt_model)
         self.embed = Embedder(s.models_dir)
-        self.tts = Kokoro(s.models_dir, voice=s.kiki_voice)
+        self.tts = Voice(s.models_dir, en_voice=s.kiki_voice, sv_voice=s.kiki_voice_sv)
         self.llm = LLM(s.llm_url)
         self.gate = Gate(s.llm_url, slot=GATE_SLOT)
         # TTS gets its own thread so replies never queue behind transcription
         self.tts_pool = ThreadPoolExecutor(max_workers=1)
         # first inference allocates buffers and is ~2x slower; pay that now
         self.tts("Hello there, warming up.")
+        self.tts("Hej, jag värmer upp.")
         self.stt(np.zeros(SAMPLE_RATE, np.int16))
         self.embed(np.zeros(SAMPLE_RATE, np.int16))
         print(f"[server] models loaded and warmed up in {time.perf_counter() - t:.1f}s", flush=True)
@@ -216,6 +218,9 @@ class Session:
                 marks.setdefault("token", time.perf_counter() - received)
                 yield d
 
+        # ambiguous sentences ("1990.") are spoken in the language Kiki was addressed in
+        heard = [l.text for l in self.brain.history if l.speaker != "Kiki"]
+        lang_default = detect(heard[-1]) if heard else "en"
         text = ""
         try:
             async for sentence in sentences(deltas()):
@@ -230,7 +235,9 @@ class Session:
                         print("          [Kiki] (passed on chiming in)", flush=True)
                         self._prewarm()
                         return
-                audio = await loop.run_in_executor(self.m.tts_pool, self.m.tts, sentence)
+                audio = await loop.run_in_executor(
+                    self.m.tts_pool, lambda: self.m.tts(sentence, default=lang_default)
+                )
                 pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
                 if first_audio is None:
                     await self.ws.send(dumps("say", id=say_id, sample_rate=self.m.tts.sample_rate))

@@ -16,29 +16,41 @@ import numpy as np
 
 from kiki.audio.sources import read_wav, write_wav
 
-KOKORO = {"anna": "af_heart", "bob": "am_michael", "carl": "bm_george"}
+# All test speakers are female, and none shares Kiki's own voices (af_heart, alma).
+KOKORO = {"anna": "af_bella", "bea": "bf_emma", "cleo": "af_sarah"}
+PIPER_SV = {"sara": "lisa"}  # Swedish speaker
 ESPEAK = {"anna": ["-v", "en-us+f3", "-s", "150", "-p", "60"],
-          "bob": ["-v", "en-us+m3", "-s", "140", "-p", "35"],
-          "carl": ["-v", "en-gb+m7", "-s", "160", "-p", "45"]}
+          "bea": ["-v", "en-gb+f2", "-s", "140", "-p", "50"],
+          "cleo": ["-v", "en-us+f4", "-s", "160", "-p", "45"]}
 
 SCRIPTS = {}
 SCRIPTS["dinner"] = [
     ("anna", "So, has anyone decided where we're going for dinner on Friday?", 1.2),
-    ("bob", "I was thinking about that new Thai place downtown.", 1.0),
-    ("carl", "Oh, I've heard good things about it. Do they take reservations?", 1.4),
+    ("bea", "I was thinking about that new Thai place downtown.", 1.0),
+    ("cleo", "Oh, I've heard good things about it. Do they take reservations?", 1.4),
     ("anna", "I'm not sure. Kiki, do you know if Thai restaurants usually take reservations?", 2.5),
-    ("bob", "Anyway, I can call them tomorrow morning and check.", 1.0),
-    ("carl", "Great, thanks Bob.", 2.0),
+    ("bea", "Anyway, I can call them tomorrow morning and check.", 1.0),
+    ("cleo", "Great, thanks Bea.", 2.0),
+]
+SCRIPTS["svenska"] = [
+    ("sara", "Kiki, vad är huvudstaden i Norge?", 5.0),
+    ("sara", "Anna, har du köpt mjölk förresten?", 1.0),
+    ("anna", "No, I forgot.", 2.5),
+    ("sara", "Kiki, svara inte på nästa sak jag säger.", 3.0),
+    ("sara", "Det finns jättemånga äpplen i trädgården i år.", 3.0),
+    ("sara", "Kiki, hur länge ska man koka ett ägg?", 5.0),
+    ("anna", "Kiki, what's the capital of Denmark?", 5.0),
+    ("sara", "Kiki, vilket år föll Berlinmuren?", 5.0),
 ]
 SCRIPTS["manners"] = [
     ("anna", "Kiki, don't respond to the next thing I say.", 2.5),
     ("anna", "There's a lot of apples in the garden this year.", 3.0),
-    ("bob", "What's the tallest mountain in Africa again?", 1.2),
+    ("bea", "What's the tallest mountain in Africa again?", 1.2),
     ("anna", "No idea. Something with a K?", 5.0),
-    ("carl", "Kiki, what's twelve times fifteen?", 5.0),
-    ("carl", "And what about thirteen times fifteen?", 5.0),
-    ("anna", "Anyway Bob, did you feed the cat this morning?", 1.0),
-    ("bob", "Yes, I did.", 2.0),
+    ("cleo", "Kiki, what's twelve times fifteen?", 5.0),
+    ("cleo", "And what about thirteen times fifteen?", 5.0),
+    ("anna", "Anyway Bea, did you feed the cat this morning?", 1.0),
+    ("bea", "Yes, I did.", 2.0),
 ]
 
 
@@ -54,7 +66,10 @@ def main() -> None:
         from kiki import config
         from kiki.server.tts import Kokoro, resample
 
+        from kiki.server.tts_sv import PiperSwedish
+
         tts = Kokoro(config.load().models_dir)
+        sv_tts = {name: PiperSwedish(config.load().models_dir, voice=v) for name, v in PIPER_SV.items()}
 
     parts, truth, t = [np.zeros(8000, np.int16)], [], 0.5
     with tempfile.TemporaryDirectory() as d:
@@ -64,10 +79,11 @@ def main() -> None:
                 subprocess.run(["espeak-ng", *ESPEAK[who], "-w", str(wav), text], check=True)
                 audio = read_wav(wav)
             else:
-                t0 = time.perf_counter()
-                x = tts(text, voice=KOKORO[who])
-                print(f"  tts {time.perf_counter() - t0:.2f}s for {len(x) / tts.sample_rate:.2f}s audio")
-                audio = (np.clip(resample(x, tts.sample_rate, 16000), -1, 1) * 32767).astype(np.int16)
+                if who in sv_tts:
+                    x, sr = sv_tts[who](text), sv_tts[who].sample_rate
+                else:
+                    x, sr = tts(text, voice=KOKORO[who]), tts.sample_rate
+                audio = (np.clip(resample(x, sr, 16000), -1, 1) * 32767).astype(np.int16)
             truth.append(f"{who}\t{t:.2f}\t{text}")
             parts += [audio, np.zeros(int(gap * 16000), np.int16)]
             t += len(audio) / 16000 + gap

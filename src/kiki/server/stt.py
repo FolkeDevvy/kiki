@@ -9,12 +9,15 @@ import sherpa_onnx
 
 from kiki.config import SAMPLE_RATE
 
-MODEL_DIR = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+MODEL_DIRS = {
+    "v2": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",  # English only
+    "v3": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",  # 25 European languages incl. Swedish
+}
 
 
 class Parakeet:
-    def __init__(self, models_dir: Path, num_threads: int = 4) -> None:
-        d = models_dir / MODEL_DIR
+    def __init__(self, models_dir: Path, num_threads: int = 4, version: str = "v3") -> None:
+        d = models_dir / MODEL_DIRS[version]
         if not d.exists():
             raise FileNotFoundError(f"{d} missing; run `kiki fetch-models --server`")
         self._rec = sherpa_onnx.OfflineRecognizer.from_transducer(

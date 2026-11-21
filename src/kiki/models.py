@@ -31,8 +31,12 @@ MODELS = [
     Model("smart-turn-v3.2-gpu.onnx", "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-gpu.onnx?download=true", "edge"),
     # NVIDIA Parakeet TDT 0.6B v2 (English), int8, CC-BY-4.0
     Model("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8", f"{SHERPA}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2", "server", archive=True),
+    # Parakeet TDT 0.6B v3: 25 European languages incl. Swedish, auto language detection
+    Model("sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8", f"{SHERPA}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2", "server", archive=True),
     # WeSpeaker ResNet34 (VoxCeleb, large-margin fine-tuned)
     Model("wespeaker_en_voxceleb_resnet34_LM.onnx", f"{SHERPA}/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx", "server"),
+    # Piper Swedish voice (CC0 / see MODEL_CARD), Kiki's voice for Swedish
+    Model("vits-piper-sv_SE-alma-medium", f"{SHERPA}/tts-models/vits-piper-sv_SE-alma-medium.tar.bz2", "server", archive=True),
     # Kokoro 82M, multi-lang v1.0 (has af_heart etc.), Apache-2.0
     Model("kokoro-multi-lang-v1_0", f"{SHERPA}/tts-models/kokoro-multi-lang-v1_0.tar.bz2", "server", archive=True),
 ]

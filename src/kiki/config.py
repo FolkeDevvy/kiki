@@ -40,7 +40,9 @@ class Settings:
     # LLM (llama.cpp server, OpenAI-compatible)
     llm_url: str = _env("KIKI_LLM_URL", "http://localhost:8081")
     # Responder
-    kiki_voice: str = _env("KIKI_VOICE", "af_heart")
+    kiki_voice: str = _env("KIKI_VOICE", "af_heart")  # Kokoro voice for English
+    kiki_voice_sv: str = _env("KIKI_VOICE_SV", "alma")  # Piper voice for Swedish (alma | lisa)
+    stt_model: str = _env("KIKI_STT_MODEL", "v3")  # Parakeet: v3 = Swedish + English, v2 = English only
     engagement_window_s: float = float(_env("KIKI_ENGAGEMENT_WINDOW_S", "30"))
     # 0 = only when addressed, 1 = occasional chime-ins (default), 2 = eager
     proactivity: int = int(_env("KIKI_PROACTIVITY", "1"))

@@ -52,12 +52,16 @@ services:
   llm:
     image: ghcr.io/ggml-org/llama.cpp:${KIKI_LLM_IMAGE:-server}
     restart: unless-stopped
-    command: ["--no-mmproj"]  # text only; skip the vision projector
+    # --no-mmproj: text only. --swa-full: keep a full KV cache for sliding-window
+    # models (Gemma) so prompt-cache reuse works; no effect on other models.
+    command: ["--no-mmproj", "--swa-full"]
     environment:
       LLAMA_CACHE: /models/llm
-      # Pure-attention model on purpose: hybrid ones (Qwen3.5) defeat partial KV-cache
-      # reuse, so every reply re-processed the whole transcript.
-      LLAMA_ARG_HF_REPO: ${KIKI_LLM_REPO:-unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M}
+      # Gemma 4 E4B: much better Swedish than Qwen3-4B at the same speed; with
+      # --swa-full its prompt cache is reused. Avoid hybrid models (Qwen3.5): they
+      # defeat partial KV-cache reuse, so every reply re-processes the transcript.
+      # Override per machine in .env: KIKI_LLM_REPO=...
+      LLAMA_ARG_HF_REPO: ${KIKI_LLM_REPO:-unsloth/gemma-4-E4B-it-GGUF:Q4_K_M}
       LLAMA_ARG_CTX_SIZE: "16384"
       LLAMA_ARG_THREADS: "${KIKI_LLM_THREADS:-6}"  # 8 physical cores: leave room for TTS/STT
       LLAMA_ARG_N_PARALLEL: "2"  # responder + gate at the same time
