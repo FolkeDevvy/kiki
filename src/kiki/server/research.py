@@ -24,7 +24,8 @@ from kiki.server.llm import LLM
 
 RESEARCH_SLOT = 2  # own llama.cpp slot, so the responder/gate caches stay warm
 PAGE_CHARS = 1200  # per page, keeps the summarizing prompt small on a CPU
-PAGES = 3
+PAGES = 6  # fetched in parallel; the ones with real text are used
+USE_PAGES = 4
 UA = "Mozilla/5.0 (X11; Linux x86_64) KikiTableAssistant/0.1"
 
 SUMMARY_PROMPT = """You are helping Kiki, a voice assistant at a table, answer a question it \
@@ -121,9 +122,13 @@ class Researcher:
         return lk
 
     async def summarize(self, lk: Lookup, conversation: str) -> str:
+        # pages that yielded real text first (many sites render with JavaScript and
+        # give nothing), then search snippets of the rest
+        full = [s for s in lk.sources if len(s.text) >= 200][:USE_PAGES]
+        rest = [s for s in lk.sources if s not in full][:4]
         material = []
-        for i, s in enumerate(lk.sources[:6], 1):
-            body = s.text or s.snippet
+        for i, s in enumerate(full + rest, 1):
+            body = s.text if s in full else s.snippet
             if body:
                 material.append(f"[{i}] {s.title} ({s.site})\n{body}")
         if not material:

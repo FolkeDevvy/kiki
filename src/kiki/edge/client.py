@@ -23,7 +23,7 @@ from kiki.edge.stats import EdgeStats
 from kiki.events import Segment, SpeechPaused, SpeechStarted, TurnEnded
 from kiki.protocol import dumps
 
-ECHO_TAIL_S = 0.4  # keep ignoring the mic briefly after playback (room reverb)
+ECHO_TAIL_S = 0.7  # keep ignoring the mic briefly after playback (reverb, device buffers)
 
 
 def _smart_turn_path(s: Settings) -> Path:

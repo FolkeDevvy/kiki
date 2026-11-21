@@ -90,6 +90,9 @@ class Player:
                     stream.start()
                     rate = sr
                 stream.write(audio.reshape(-1, 1))
+                # write() returns once the audio is queued; what's left to play is the
+                # device latency. Keep the mic muted until it has really played.
+                self.busy_until = max(self.busy_until, time.monotonic() + float(stream.latency))
             except Exception as e:  # no audio device etc.; keep the edge alive
                 print(f"[player] playback failed: {e!r}", flush=True)
                 self.enabled = False

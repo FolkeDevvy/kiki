@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -167,6 +168,10 @@ class Session:
         fallback = self._current[-1].speaker if self._current else None
         who, sim = self.registry.assign(emb, len(audio) / SAMPLE_RATE, fallback=fallback)
         ms = (time.perf_counter() - t) * 1000
+        if text and self._is_own_echo(text):
+            self.diag.segment(self.edge, t0, audio, "Kiki-echo", sim, text, ms)
+            print(f"{t0:7.2f}  [echo of Kiki, ignored] {text}", flush=True)
+            return
         self.diag.segment(self.edge, t0, audio, who, sim, text, ms)
         if text:
             self._current.append(Utterance(who, text, t0, t1, sim))
@@ -306,6 +311,23 @@ class Session:
             self.diag.reply(self.edge, {"text": text, "chime": chime,
                                         "marks": {k: round(v * 1000) for k, v in marks.items()},
                                         "first_audio_ms": round(first_audio * 1000) if first_audio else None})
+
+    def _is_own_echo(self, text: str, window_s: float = 8.0) -> bool:
+        """Did the mic just pick up Kiki's own voice? (the edge mutes while playing,
+        but device buffers can outlast that)"""
+        if time.monotonic() - self._last_kiki_end > window_s:
+            return False
+        kiki = [l.text for l in self.brain.history[-3:] if l.speaker == "Kiki"]
+        if not kiki:
+            return False
+        norm = lambda x: re.sub(r"[^\w ]", "", x.lower()).split()  # noqa: E731
+        heard = norm(text)
+        said = norm(kiki[-1])
+        if not heard:
+            return False
+        # fraction of heard words that appear in what Kiki just said (echoes are often partial)
+        overlap = sum(w in said for w in heard) / len(heard)
+        return overlap >= 0.6 and len(heard) >= 2
 
     # ---- background lookups -------------------------------------------------------
     def _start_lookup(self, lk: Lookup) -> None:

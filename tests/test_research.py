@@ -41,3 +41,20 @@ def test_promise_without_marker_is_caught():
     assert not promised_lookup("Oslo är huvudstaden i Norge.")
     assert query_from_question("Kiki, vem vann senaste Melodifestivalen?") == "vem vann senaste Melodifestivalen"
     assert query_from_question("Hej Kiki! What's the weather tomorrow?") == "What's the weather tomorrow"
+
+
+def test_own_echo_detection():
+    import time as _t
+
+    from kiki.server.app import Session
+    from kiki.server.brain import Brain
+
+    s = Session.__new__(Session)  # just the echo check, no models
+    s.brain = Brain(llm=None, gate=None)
+    s.brain.said("Bra fråga, jag kollar!")
+    s._last_kiki_end = _t.monotonic()
+    assert s._is_own_echo("Bra fråga, jag kollar.")
+    assert s._is_own_echo("jag kollar")
+    assert not s._is_own_echo("Vad kostar Nvidia-aktien?")
+    s._last_kiki_end = _t.monotonic() - 60
+    assert not s._is_own_echo("Bra fråga, jag kollar.")
