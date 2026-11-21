@@ -201,8 +201,20 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
   - A near-miss of the name at the start of a line ("Kik i…") counts only with a
     confident gate.
 - **All voices female:** Kiki's own voices and every synthetic test speaker.
-- **Fully self-hosted:** no cloud STT/TTS/LLM, and no Claude (2026-11-21). This
-  replaces the earlier cloud plan (AssemblyAI / Claude / cloud TTS).
+- **Mostly self-hosted:** speech-to-text, voice, turn detection, the gate and
+  speaker ID run locally (2026-11-21).
+- **Brain on Claude** (2026-11-21, reverses "local LLM only"): replies and web
+  research use Claude Opus 5.5 at medium effort through the Claude Agent SDK
+  (Claude Code), authenticated with the user's subscription
+  (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`).
+  - One persistent Claude session per conversation receives only the new lines.
+  - Research is a separate query that may only use WebSearch and WebFetch.
+  - The turn-taking gate stays local, because it judges every turn.
+  - `KIKI_BRAIN=local` switches back to llama.cpp, and the server falls back to it
+    if no token is set.
+  - Measured: first audio 3–7 s, against 2–3 s with local Gemma; lookups ~11 s,
+    against 18–40 s locally. Understanding of mis-heard names and Swedish quality
+    are far better.
 - **Proactive from day one,** with a threshold, a cooldown, and voice controls.
 - **Run in Docker** on the dev laptop.
 

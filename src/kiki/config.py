@@ -39,7 +39,14 @@ class Settings:
     # re-tune with real voices from the Pi mic.
     speaker_threshold: float = float(_env("KIKI_SPEAKER_THRESHOLD", "0.68"))
 
-    # Web lookups via self-hosted SearXNG; empty disables them
+    # Brain: "claude" = replies + research on Claude via Claude Code (needs
+    # CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`), "local" = llama.cpp.
+    # The turn-taking gate always runs locally (it judges every turn).
+    brain: str = _env("KIKI_BRAIN", "claude")
+    claude_model: str = _env("KIKI_CLAUDE_MODEL", "claude-opus-5-5")
+    claude_effort: str = _env("KIKI_CLAUDE_EFFORT", "medium")
+
+    # Web lookups via self-hosted SearXNG (used by the local brain); empty disables them
     search_url: str = _env("KIKI_SEARCH_URL", "")
 
     # LLM (llama.cpp server, OpenAI-compatible)

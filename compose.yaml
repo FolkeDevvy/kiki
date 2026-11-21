@@ -27,6 +27,10 @@ services:
   server:
     <<: *kiki
     command: ["serve", "--host", "0.0.0.0"]
+    # .env holds CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) for the Claude brain
+    env_file:
+      - path: .env
+        required: false
     environment:
       HOME: /tmp
       KIKI_LLM_URL: http://llm:8080

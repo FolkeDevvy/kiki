@@ -112,6 +112,7 @@ class Line:
     speaker: str
     text: str
     t: float  # wall clock (time.time())
+    in_session: bool = False  # a Kiki line the Claude session already has as its own reply
 
 
 @dataclass
@@ -140,15 +141,16 @@ class Brain:
     last_kiki_t: float = 0.0
     last_target: str | None = None  # who Kiki last answered
     looking_up: list[str] = field(default_factory=list)  # queries in progress (for the prompt)
+    _sent: int = 0  # history lines already sent to the Claude session
     _maybe_named: bool = False  # set per decision: near-miss of the name at line start
 
     # ---- transcript ----
     def hear(self, speaker: str, text: str) -> None:
         self.history.append(Line(speaker, text, time.time()))
 
-    def said(self, text: str, chime: bool = False, target: str | None = None) -> None:
+    def said(self, text: str, chime: bool = False, target: str | None = None, in_session: bool = False) -> None:
         now = time.time()
-        self.history.append(Line("Kiki", text, now))
+        self.history.append(Line("Kiki", text, now, in_session=in_session))
         self.last_kiki_t = now
         self.last_target = target
         if chime:
@@ -171,6 +173,23 @@ class Brain:
                 ". If asked about that, say you're still checking."
         content = self.transcript() + (CHIME_SUFFIX if chime else "") + state + ")" + hint
         return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
+
+    def _tail(self, chime: bool) -> str:
+        heard = [l.text for l in self.history if l.speaker != "Kiki"]
+        hint = "\n(Svara på svenska.)" if heard and detect(heard[-1]) == "sv" else "\n(Reply in English.)"
+        state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
+        if self.looking_up:
+            state += " You're still looking up: " + "; ".join(self.looking_up) + \
+                ". If asked about that, say you're still checking."
+        return (CHIME_SUFFIX if chime else "") + state + ")" + hint
+
+    def claude_message(self, chime: bool = False) -> str:
+        """The next user turn for a persistent Claude session: only the lines it
+        hasn't seen (its own replies are already in the session), plus hints."""
+        new = [l for l in self.history[self._sent:] if not (l.speaker == "Kiki" and l.in_session)]
+        self._sent = len(self.history)
+        lines = "\n".join(f"[{l.speaker}]: {l.text}" for l in new) or "(nothing new was said)"
+        return lines + self._tail(chime)
 
     # ---- floor policy ----
     @property
@@ -236,6 +255,18 @@ class Brain:
             return Decision("chime", f"chime (p={v.p('chime'):.2f})", None, v, named)
 
         return Decision("silent", "gate: silent", speaker, v, named)
+
+
+PERSONA_CLAUDE = PERSONA.replace(
+    "You will get the conversation transcript. Reply as Kiki to the last line, with only the words Kiki says.",
+    "",
+) + """
+
+How this conversation reaches you: each message contains the newest lines of the table \
+conversation since your last reply (from speech recognition, so names and words are sometimes \
+misheard; use context to understand what was meant), followed by short notes in parentheses. \
+Your own earlier replies are in this chat already. Reply with only the words Kiki says now, \
+to the last line."""
 
 
 def is_pass(text: str) -> bool:

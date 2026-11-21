@@ -23,7 +23,8 @@ from websockets.exceptions import ConnectionClosed
 
 from kiki.config import SAMPLE_RATE, Settings
 from kiki.protocol import dumps
-from kiki.server.brain import Brain, Decision, is_pass
+from kiki.server import claude_brain
+from kiki.server.brain import PERSONA_CLAUDE, Brain, Decision, is_pass, maybe_named
 from kiki.server.diagnostics import Diagnostics
 from kiki.server.diagnostics import serve as serve_diagnostics
 from kiki.server.gate import Gate
@@ -79,6 +80,13 @@ class Models:
         self.llm = LLM(s.llm_url)
         self.gate = Gate(s.llm_url, slot=GATE_SLOT)
         self.research = Researcher(s.search_url, self.llm) if s.search_url else None
+        self.use_claude = s.brain == "claude" and claude_brain.available()
+        if s.brain == "claude" and not self.use_claude:
+            print("[server] KIKI_BRAIN=claude but no CLAUDE_CODE_OAUTH_TOKEN; using the local brain", flush=True)
+        if self.use_claude:
+            self.research = claude_brain.ClaudeResearcher(s.claude_model, s.claude_effort)
+            print(f"[server] brain: Claude ({s.claude_model}, effort {s.claude_effort}) via Claude Code", flush=True)
+        self.claude_model, self.claude_effort = s.claude_model, s.claude_effort
         # TTS gets its own thread so replies never queue behind transcription
         self.tts_pool = ThreadPoolExecutor(max_workers=1)
         # first inference allocates buffers and is ~2x slower; pay that now
@@ -98,6 +106,10 @@ class Session:
         self.registry = registry
         self.pool = pool
         self.brain = Brain(models.llm, models.gate, s.engagement_window_s, s.history_turns, s.proactivity)
+        self.claude = (claude_brain.ClaudeResponder(PERSONA_CLAUDE, models.claude_model, models.claude_effort)
+                       if models.use_claude else None)
+        if self.claude is not None:
+            self._claude_warm = asyncio.create_task(self._warm_claude())
 
         self.ws: ServerConnection | None = None
         self.turns: list[Turn] = []
@@ -191,13 +203,22 @@ class Session:
         self._bg.add(task)
         task.add_done_callback(self._bg.discard)
 
+    async def _warm_claude(self) -> None:
+        t = time.perf_counter()
+        try:
+            await self.claude.warm()
+            print(f"[server] Claude session ready ({time.perf_counter() - t:.1f} s)", flush=True)
+        except Exception as e:
+            print(f"[server] Claude session failed to start: {e!r}", flush=True)
+
     def _replying(self) -> bool:
         return self._reply is not None and not self._reply.done()
 
     async def _decide_and_act(self, turn: Turn, speaker: str, received: float) -> None:
         decision = asyncio.create_task(self.brain.decide(speaker, turn.text))
         spec: asyncio.Task | None = None
-        if self.brain.likely_reply(turn.text) and not self._replying():
+        likely = maybe_named(turn.text) if self.claude is not None else self.brain.likely_reply(turn.text)
+        if likely and not self._replying():
             # speculative: generate while the gate thinks; audio waits for its verdict
             spec = self._reply = asyncio.create_task(self._speak(decision, received, chime=False, question=turn.text))
         d = await decision
@@ -230,6 +251,8 @@ class Session:
     def _prewarm(self) -> None:
         """Keep the responder slot's KV cache current with the transcript, so a
         reply only has to process the newest line (~2 s saved on the laptop)."""
+        if self.claude is not None:
+            return  # Claude Code caches its own session
         if self._warm is not None and not self._warm.done():
             return  # one in flight is enough; the next turn will catch up
         self._warm = asyncio.create_task(self.m.llm.prewarm(self.brain.messages(), slot=RESPONDER_SLOT))
@@ -247,7 +270,11 @@ class Session:
         lookup_query: list[str] = []
 
         async def raw():
-            async for d in self.brain.llm.stream(self.brain.messages(chime=chime), slot=RESPONDER_SLOT):
+            if self.claude is not None:
+                source = self.claude.stream(self.brain.claude_message(chime=chime))
+            else:
+                source = self.brain.llm.stream(self.brain.messages(chime=chime), slot=RESPONDER_SLOT)
+            async for d in source:
                 marks.setdefault("token", time.perf_counter() - received)
                 yield d
 
@@ -258,6 +285,7 @@ class Session:
         heard = [l.text for l in self.brain.history if l.speaker != "Kiki"]
         lang_default = detect(heard[-1]) if heard else "en"
         text = ""
+        d: Decision | None = None
         try:
             async for sentence in sentences(deltas()):
                 marks.setdefault("chunk", time.perf_counter() - received)
@@ -295,22 +323,28 @@ class Session:
             print(f"[server] reply failed: {e!r}", flush=True)
             return
         if text:
-            self.brain.said(text, chime=chime, target=None if chime else d.target)
+            self.brain.said(text, chime=chime, target=None if chime or d is None else d.target,
+                            in_session=self.claude is not None)
             self._prewarm()
+            breakdown = " ".join(f"{k}={v * 1000:.0f}" for k, v in marks.items())
+            fa = f"{first_audio * 1000:.0f} ms" if first_audio is not None else "n/a"
+            print(f"          [Kiki] {text}   (first audio {fa}; {breakdown} ms)", flush=True)
+            self._write({"kind": "kiki", "text": text, "chime": chime, "first_audio_s": first_audio, "marks": marks})
+            self.diag.reply(self.edge, {"text": text, "chime": chime,
+                                        "claude": dict(self.claude.last_usage) if self.claude else None,
+                                        "marks": {k: round(v * 1000) for k, v in marks.items()},
+                                        "first_audio_ms": round(first_audio * 1000) if first_audio else None})
         if not question:
             heard = [l for l in self.brain.history if l.speaker != "Kiki"]
             question = heard[-1].text if heard else ""
         if not lookup_query and not chime and text and promised_lookup(text) and question:
             lookup_query.append(query_from_question(question))  # promised to check, forgot the marker
         if lookup_query:
+            if d is None:  # marker-only reply: nothing was spoken, so check the gate now
+                d = await decision
+                if d.action != "reply":
+                    return  # speculative reply that wasn't approved: no lookup either
             self._start_lookup(Lookup(lookup_query[0], question or lookup_query[0], lang_default, d.target))
-            breakdown = " ".join(f"{k}={v * 1000:.0f}" for k, v in marks.items())
-            fa = f"{first_audio * 1000:.0f} ms" if first_audio is not None else "n/a"
-            print(f"          [Kiki] {text}   (first audio {fa}; {breakdown} ms)", flush=True)
-            self._write({"kind": "kiki", "text": text, "chime": chime, "first_audio_s": first_audio, "marks": marks})
-            self.diag.reply(self.edge, {"text": text, "chime": chime,
-                                        "marks": {k: round(v * 1000) for k, v in marks.items()},
-                                        "first_audio_ms": round(first_audio * 1000) if first_audio else None})
 
     def _is_own_echo(self, text: str, window_s: float = 8.0) -> bool:
         """Did the mic just pick up Kiki's own voice? (the edge mutes while playing,
@@ -400,6 +434,8 @@ class Session:
         self._log.flush()
 
     async def close(self) -> None:
+        if self.claude is not None:
+            await self.claude.reset()
         self._worker.cancel()
         if self._reply is not None:
             self._reply.cancel()

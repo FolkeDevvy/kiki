@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # server-only extras (not installed on the Pi)
-server = ["trafilatura>=2.0"]
+server = ["trafilatura>=2.0", "claude-agent-sdk>=0.1.60"]
 
 [project.scripts]
 kiki = "kiki.cli:main"
