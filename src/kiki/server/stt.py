@@ -77,10 +77,23 @@ class Bilingual:
         self.sv = KBWhisper(models_dir, size=kb_size)
         self.en_min_conf = en_min_conf
         self.last: dict = {}
+        self.recent: list[str] = []  # languages of recent segments (conversation prior)
+
+    def threshold(self, audio: np.ndarray) -> float:
+        """Short phrases in a Swedish conversation ("Tack", "Okej", "Tack bror") get
+        English-looking transcripts with decent confidence; demand much more then."""
+        swedish_talk = self.recent[-5:].count("sv") >= 3
+        short = len(audio) < SAMPLE_RATE * 1.8
+        return -0.06 if (swedish_talk and short) else self.en_min_conf
 
     def __call__(self, audio: np.ndarray) -> str:
         text, conf = self.en.decode(audio)
-        if conf >= self.en_min_conf and text:
+        out = self._route(audio, text, conf)
+        self.recent = (self.recent + [self.last["lang"]])[-10:]
+        return out
+
+    def _route(self, audio: np.ndarray, text: str, conf: float) -> str:
+        if conf >= self.threshold(audio) and text:
             self.last = {"lang": "en", "conf": round(conf, 2), "en_text": text}
             return text
         sv = self.sv(audio)

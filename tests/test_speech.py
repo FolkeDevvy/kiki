@@ -41,3 +41,25 @@ def test_name_matches_common_spellings():
     assert maybe_named("Can you hear me kick it?")
     for t in ["Kom hit nu", "Kaffe, någon?", "Can you pass the milk"]:
         assert not maybe_named(t), t
+
+
+def test_sources_and_links_are_never_spoken():
+    from kiki.server.speech import clean, strip_sources
+
+    a = ("Okej, jag kollade på Yr: klart och minus 2 grader.\n\nSources:\n"
+         "- [Yr – Aneboda](https://www.yr.no/en/forecast/x)")
+    assert strip_sources(a) == "Okej, jag kollade på Yr: klart och minus 2 grader."
+    assert clean("Enligt [Yr](https://yr.no) blir det snö.") == "Enligt Yr blir det snö."
+    assert "http" not in clean("Se https://example.com för mer.")
+
+
+def test_reply_language_follows_the_conversation():
+    from kiki.server.brain import Brain
+
+    b = Brain(llm=None, gate=None)
+    b.hear("Folke", "Hej Kiki, vad är vädret nere i Aneboda?")
+    b.hear("Folke", "Vi får se om den här lyckas.")
+    b.hear("Folke", "Thank you, bro.")
+    assert b.reply_language() == "sv"  # short English-looking line in a Swedish talk
+    b.hear("Folke", "Could you tell me what the weather is like in London?")
+    assert b.reply_language() == "en"  # a real English sentence switches

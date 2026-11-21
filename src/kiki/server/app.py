@@ -292,8 +292,7 @@ class Session:
             return raw() if chime else split_lookup(raw(), lookup_query.append)
 
         # ambiguous sentences ("1990.") are spoken in the language Kiki was addressed in
-        heard = [l.text for l in self.brain.history if l.speaker != "Kiki"]
-        lang_default = detect(heard[-1]) if heard else "en"
+        lang_default = self.brain.reply_language()
         text = ""
         d: Decision | None = None
         try:

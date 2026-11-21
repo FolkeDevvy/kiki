@@ -12,8 +12,21 @@ _EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0000FE0F\U0001
 _SPEAKER_TAG = re.compile(r"^\s*\[?\*{0,2}kiki\*{0,2}\]?\s*:\s*", re.IGNORECASE)
 
 
+_SOURCES = re.compile(r"\n\s*(sources?|källor|källa|references?)\s*:.*", re.IGNORECASE | re.DOTALL)
+_MD_LINK = re.compile(r"\[([^\]]*)\]\((https?://[^)]*)\)")
+_URL = re.compile(r"\(?https?://\S+\)?")
+
+
+def strip_sources(text: str) -> str:
+    """Drop a trailing 'Sources:' list, markdown links (keep their text) and bare URLs."""
+    text = _SOURCES.sub("", text)
+    text = _MD_LINK.sub(r"\1", text)
+    return _URL.sub("", text).strip()
+
+
 def clean(text: str) -> str:
     """Strip things a TTS shouldn't read out: markdown, emoji, a leading '[Kiki]:'."""
+    text = strip_sources(text)
     text = _SPEAKER_TAG.sub("", text)
     text = _MARKDOWN.sub("", text)
     text = _EMOJI.sub("", text)

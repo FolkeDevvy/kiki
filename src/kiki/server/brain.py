@@ -193,8 +193,7 @@ class Brain:
         # llama.cpp's KV cache (kept warm by prewarm) covers everything before it.
         # The language hint goes last: small models otherwise follow the
         # conversation's majority language instead of the person they answer.
-        heard = [l.text for l in self.history if l.speaker != "Kiki"]
-        hint = "\n(Svara på svenska.)" if heard and detect(heard[-1]) == "sv" else "\n(Reply in English.)"
+        hint = "\n(Svara på svenska.)" if self.reply_language() == "sv" else "\n(Reply in English.)"
         state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
         if self.looking_up:
             state += " You're still looking up: " + "; ".join(self.looking_up) + \
@@ -202,9 +201,19 @@ class Brain:
         content = self.transcript() + (CHIME_SUFFIX if chime else "") + state + ")" + hint
         return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
 
+    def reply_language(self) -> str:
+        """The language to answer in: the last line's, if it's a real sentence;
+        for short lines ("Thank you", "Okej") the language people have been using."""
+        heard = [l.text for l in self.history if l.speaker != "Kiki"][-6:]
+        if not heard:
+            return "en"
+        if len(heard[-1].split()) >= 4:
+            return detect(heard[-1])
+        votes = [detect(t) for t in heard if len(t.split()) >= 3] or [detect(heard[-1])]
+        return max(set(votes), key=votes.count)
+
     def _tail(self, chime: bool, unsure: bool = False) -> str:
-        heard = [l.text for l in self.history if l.speaker != "Kiki"]
-        hint = "\n(Svara på svenska.)" if heard and detect(heard[-1]) == "sv" else "\n(Reply in English.)"
+        hint = "\n(Svara på svenska.)" if self.reply_language() == "sv" else "\n(Reply in English.)"
         state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
         if self.looking_up:
             state += " You're still looking up: " + "; ".join(self.looking_up) + \
