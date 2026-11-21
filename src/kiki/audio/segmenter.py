@@ -47,6 +47,9 @@ class Segmenter:
         self._silence_run = 0  # consecutive non-speech frames
         self.last_probability: float | None = None
         self.last_vad = 0.0
+        # extra silence required before ending the next turn (set after a barge-in, so
+        # "okay okay, stop, ... what's two plus two?" isn't cut after "okay")
+        self.patience_ms = 0
         self.turn_ms: list[float] = []  # Smart Turn call durations (drained by edge stats)
 
     @property
@@ -92,11 +95,14 @@ class Segmenter:
                 prob = self.turn(self.turn_audio())
                 self.turn_ms.append((time.perf_counter() - t) * 1000)
                 self.last_probability = prob
-                if prob >= self.s.turn_threshold:
+                if prob >= self.s.turn_threshold and self._silence_run * FRAME_MS >= self.patience_ms:
                     events.append(self._end(prob, forced=False))
             return events
 
         # PAUSED
+        if (self.last_probability or 0) >= self.s.turn_threshold and self.patience_ms \
+                and self._silence_run * FRAME_MS >= self.patience_ms:
+            return events + [self._end(self.last_probability, forced=False)]
         if self._speech_run >= min_speech:
             self.state = State.SPEECH  # same turn continues, new segment
             back = min(len(self._turn), min_speech + max(1, self.s.preroll_ms // FRAME_MS))
@@ -127,4 +133,5 @@ class Segmenter:
         self._turn = []
         self._speech_run = self._silence_run = 0
         self.last_probability = None
+        self.patience_ms = 0
         return ev

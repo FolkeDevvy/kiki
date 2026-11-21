@@ -55,3 +55,13 @@ def test_two_utterances_with_long_gap_are_two_turns(models_dir, say):
     b = say("Yes, it was amazing.", "b")
     events = run(make(models_dir), np.concatenate([silence(0.3), a, silence(3), b, silence(3)]))
     assert len([e for e in events if isinstance(e, TurnEnded)]) == 2
+
+
+def test_patience_keeps_an_interruption_in_one_turn(models_dir, say):
+    seg = make(models_dir)
+    seg.patience_ms = 1000
+    a = say("Okay okay.", "ok")
+    b = say("Stop, that's enough.", "stop")
+    events = run(seg, np.concatenate([silence(0.3), a, silence(0.4), b, silence(3)]))
+    ends = [e for e in events if isinstance(e, TurnEnded)]
+    assert len(ends) == 1  # without patience a short pause after "okay okay" can end the turn

@@ -67,6 +67,13 @@ class Settings:
     # Diagnostics HTTP port on the server (see server/diagnostics.py)
     debug_port: int = int(_env("KIKI_DEBUG_PORT", "8766"))
 
+    # Barge-in: talking over Kiki stops her (edge). Needs sustained, confident speech
+    # louder than the echo residue of her own voice.
+    barge_in: bool = _env("KIKI_BARGE_IN", "1") == "1"
+    barge_vad_threshold: float = float(_env("KIKI_BARGE_VAD", "0.8"))
+    barge_min_dbfs: float = float(_env("KIKI_BARGE_MIN_DBFS", "-38"))
+    barge_min_speech_ms: int = int(_env("KIKI_BARGE_MS", "250"))
+
     # Audio device (sounddevice name or index); empty = system default
     input_device: str = _env("KIKI_INPUT_DEVICE", "")
 

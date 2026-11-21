@@ -38,6 +38,10 @@ SCRIPTS["followup"] = [  # follow-ups that aren't questions should still get rep
     ("anna", "Anyway Bea, are you coming to dinner tomorrow?", 1.2),
     ("bea", "Yes, I'll be there at seven.", 4.0),
 ]
+SCRIPTS["bargein"] = [  # Bea talks over a long answer
+    ("anna", "Kiki, tell us a long story about a dragon who loves baking.", 6.5),
+    ("bea", "Okay okay, stop, that's enough. Kiki, what's two plus two?", 8.0),
+]
 SCRIPTS["lookup"] = [
     ("anna", "Kiki, what's the weather going to be like in Stockholm tomorrow?", 3.0),
     ("bea", "Anna, do you want to go to the cinema tonight?", 1.0),

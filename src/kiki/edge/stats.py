@@ -37,6 +37,8 @@ class EdgeStats:
         self.muted = 0
         self.turn_ms: list[float] = []
         self.segments = 0
+        self.barge_ins = 0
+        self.echo_db: list[float] = []  # mic level while Kiki talks (echo residue + talk-over)
         self._dropped0 = sources.dropped_frames
 
     def frame(self, frame: np.ndarray, vad_p: float | None, muted: bool) -> None:
@@ -73,6 +75,10 @@ class EdgeStats:
             "muted_frames": self.muted,  # half-duplex: mic ignored while Kiki talks
             "dropped_frames": sources.dropped_frames - self._dropped0,
             "segments": self.segments,
+            "barge_ins": self.barge_ins,
+            # while Kiki talks: typical and loud mic level (tune barge-in min_dbfs above echo_p90)
+            "echo_dbfs_median": round(float(np.median(self.echo_db)), 1) if self.echo_db else None,
+            "echo_dbfs_p90": round(float(np.percentile(self.echo_db, 90)), 1) if self.echo_db else None,
             "smart_turn_ms_max": round(max(self.turn_ms), 1) if self.turn_ms else None,
             "load_avg_1m": round(os.getloadavg()[0], 2),
             "cpu_temp_c": _read_temp(),

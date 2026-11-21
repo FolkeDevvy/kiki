@@ -178,6 +178,7 @@ class Brain:
     looking_up: list[str] = field(default_factory=list)  # queries in progress (for the prompt)
     _sent: int = 0  # history lines already sent to the Claude session
     allow_unsure: bool = False  # set when the responder is good at PASSing (Claude)
+    interrupted: bool = False  # Kiki was just talked over (barge-in)
     _maybe_named: bool = False  # set per decision: near-miss of the name at line start
 
     # ---- transcript ----
@@ -213,6 +214,12 @@ class Brain:
             state += " You're still looking up: " + "; ".join(self.looking_up) + \
                 ". If asked about that, say you're still checking."
         extra = CHIME_SUFFIX if chime else UNSURE_SUFFIX if unsure else ""
+        if self.interrupted:
+            self.interrupted = False
+            state += (" You were just cut off mid-sentence by someone talking over you. Don't finish "
+                      "or repeat what you were saying. If all they said was something like 'okay', "
+                      "'stop', 'enough' or 'shh', answer exactly PASS. Otherwise answer what they "
+                      "said, very briefly.")
         return extra + state + ")"
 
     def claude_message(self, chime: bool = False, unsure: bool = False) -> str:

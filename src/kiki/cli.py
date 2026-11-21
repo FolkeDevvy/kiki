@@ -23,6 +23,7 @@ async def _edge(args: argparse.Namespace) -> None:
         playback=not args.no_playback,
         save_replies=Path(args.save_replies) if args.save_replies else None,
         half_duplex=not args.full_duplex,
+        simulate_playback=args.simulate_playback,
     )
 
 
@@ -97,6 +98,8 @@ def main() -> None:
     e.add_argument("--no-playback", action="store_true", help="don't play Kiki's voice")
     e.add_argument("--save-replies", help="also save Kiki's replies as WAVs in this dir")
     e.add_argument("--full-duplex", action="store_true", help="keep listening while Kiki talks (needs AEC)")
+    e.add_argument("--simulate-playback", action="store_true",
+                   help="pretend to play Kiki's replies (real timing, no sound): tests barge-in on replays")
 
     sv = sub.add_parser("serve", help="run the server: STT, speaker ID, brain")
     sv.add_argument("--host", default="0.0.0.0")

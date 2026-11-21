@@ -121,6 +121,7 @@ class Session:
         self._reply: asyncio.Task | None = None
         self._warm: asyncio.Task | None = None
         self._bg: set[asyncio.Task] = set()
+        self._say_task: asyncio.Task | None = None  # a lookup answer being spoken
         # floor tracking, so background answers wait for a pause
         self._speech_active = False
         self._last_turn_end = 0.0
@@ -149,6 +150,8 @@ class Session:
                 self.diag.edge_stats(self.edge, ev)
             elif kind == "speech_started":
                 self._speech_active = True
+            elif kind == "barge_in":
+                self._interrupted()
             elif kind == "turn_end":
                 self._speech_active = False
                 self._last_turn_end = time.monotonic()
@@ -213,6 +216,19 @@ class Session:
             print(f"[server] Claude session ready ({time.perf_counter() - t:.1f} s)", flush=True)
         except Exception as e:
             print(f"[server] Claude session failed to start: {e!r}", flush=True)
+
+    def _interrupted(self) -> None:
+        """Someone talked over Kiki: the edge already stopped playback; stop
+        generating, and let the next reply know she was cut off."""
+        stopped = False
+        for task in (self._reply, self._say_task):
+            if task is not None and not task.done():
+                task.cancel()
+                stopped = True
+        if stopped:
+            self.brain.interrupted = True
+            print("          [Kiki] (interrupted, stopping)", flush=True)
+            self.diag.reply(self.edge, {"text": "(interrupted)", "barge_in": True})
 
     def _replying(self) -> bool:
         return self._reply is not None and not self._reply.done()
@@ -323,7 +339,14 @@ class Session:
                 self._last_kiki_end = time.monotonic()
         except asyncio.CancelledError:
             if said:  # cut off mid-reply: close the say so the edge isn't left hanging
-                await self.ws.send(dumps("say_end", id=say_id, text=" ".join(said)))
+                try:
+                    await self.ws.send(dumps("say_end", id=say_id, text=" ".join(said)))
+                except ConnectionClosed:
+                    pass
+                self._last_kiki_end = time.monotonic()
+                # remember roughly what got out (the session has its own copy)
+                self.brain.said(" ".join(said) + " [cut off]", target=d.target if d else None,
+                                in_session=self.claude is not None)
             raise
         except ConnectionClosed:
             return
@@ -390,7 +413,13 @@ class Session:
             print(f"          [Kiki] (lookup done in {time.time() - lk.started:.0f}s via {src or '-'}"
                   f"{'; error ' + lk.error if lk.error else ''})", flush=True)
             await self._wait_for_floor()
-            await self._say_text(lk.answer, target=lk.asker)
+            self._say_task = asyncio.create_task(self._say_text(lk.answer, target=lk.asker))
+            try:
+                await self._say_task
+            except asyncio.CancelledError:
+                if not self._say_task.cancelled():
+                    raise
+                return  # interrupted while reading out the answer
             self.diag.reply(self.edge, {"text": lk.answer, "lookup": lk.query,
                                         "sources": [s.url for s in lk.sources[:3]],
                                         "seconds": round(time.time() - lk.started, 1), "error": lk.error})

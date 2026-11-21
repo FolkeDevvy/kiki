@@ -184,6 +184,14 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
      delivered at the next pause in the conversation.
    - Known cost on the laptop: while it researches, turn decisions take 3–6 s
      instead of ~1 s (CPU contention). The A4000 fixes this.
+4c. **Barge-in.** ✅ The edge keeps listening while Kiki talks, using a second VAD on
+   the real mic. Sustained, confident speech (≥ 250 ms at VAD ≥ 0.8) louder than the
+   echo residue (≥ −38 dBFS) stops playback within ~50 ms and tells the server, which
+   cancels the reply and the Claude generation behind it. The first ~450 ms of speech
+   is replayed into turn handling, and the next turn waits for 1 s of silence, so
+   "okay okay, stop… what's 2+2?" stays one turn. Claude is told it was cut off, and
+   replies PASS to a bare "stop" or "okay". The stats report the mic level while Kiki
+   talks (`echo_dbfs_p90`) for tuning `KIKI_BARGE_MIN_DBFS`.
 5. **Personality and memory:** persona, per-person memory (SQLite), local tools.
 6. **Tuning:** label logged decisions, build an eval set, tune the gate. Move the
    server to the A4000 box.

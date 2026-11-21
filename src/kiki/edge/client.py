@@ -17,7 +17,8 @@ from kiki import models
 from kiki.audio.segmenter import Segmenter
 from kiki.audio.turn import SmartTurn
 from kiki.audio.vad import SileroVad
-from kiki.config import SAMPLE_RATE, Settings
+from kiki.config import FRAME_MS, SAMPLE_RATE, Settings
+from kiki.edge.bargein import BargeIn
 from kiki.edge.player import Player
 from kiki.edge.stats import EdgeStats
 from kiki.events import Segment, SpeechPaused, SpeechStarted, TurnEnded
@@ -124,9 +125,10 @@ async def run(
     playback: bool = True,
     save_replies: Path | None = None,
     half_duplex: bool = True,
+    simulate_playback: bool = False,
 ) -> None:
     seg = build_segmenter(s)
-    player = Player(enabled=playback, save_dir=save_replies)
+    player = Player(enabled=playback, save_dir=save_replies, simulate=simulate_playback)
     import platform
 
     hello = {
@@ -136,21 +138,50 @@ async def run(
         "half_duplex": half_duplex,
         "vad_threshold": s.vad_threshold,
     }
+    hello["barge_in"] = s.barge_in
     link = Link(server_url, player, hello) if server_url else None
     stats = EdgeStats(s.vad_threshold)
+    barge = (BargeIn(SileroVad(models.path(s.models_dir, "silero_vad.onnx")), s.barge_vad_threshold,
+                     s.barge_min_dbfs, s.barge_min_speech_ms) if s.barge_in and half_duplex else None)
+    from collections import deque
+
+    recent_real: deque[np.ndarray] = deque(maxlen=max(1, 450 // FRAME_MS))  # start of an interruption
     if link is not None and not await link.wait_connected(10):
         print(f"[edge] server {server_url} not reachable yet; will keep retrying", flush=True)
     loop = asyncio.get_running_loop()
     try:
         async for frame in frames:
             muted = half_duplex and time.monotonic() < player.busy_until + ECHO_TAIL_S
+            replay: list[np.ndarray] = []
             if muted:
-                # Kiki is talking and we have no echo cancellation yet: don't
-                # listen to ourselves. Feed silence so VAD/turn state settles.
+                # Kiki is talking: the turn logic hears silence (no echo turns), but a
+                # second VAD listens for someone talking over her.
                 stats.frame(frame, None, muted=True)
+                real = frame
                 frame = np.zeros_like(frame)
+                if barge is not None:
+                    recent_real.append(real)
+                    interrupted = barge.update(real)
+                    stats.echo_db += barge.levels
+                    barge.levels = []
+                    if interrupted and player.playing:
+                        print(f"{seg.t:7.2f}  ✋ barge-in: stopping Kiki", flush=True)
+                        player.stop()
+                        stats.barge_ins += 1
+                        if link:
+                            await link.send(dumps("barge_in", t=seg.t))
+                        replay = list(recent_real)  # the words they interrupted with
+                        recent_real.clear()
+                        seg.patience_ms = 1000  # let them finish: don't end the turn at "okay"
+                        barge.reset()
+                        muted = False
+            elif barge is not None and recent_real:
+                recent_real.clear()
+                barge.reset()
             # Smart Turn takes ~100 ms on a pause; keep it off the event loop
-            events = await loop.run_in_executor(None, seg.process, frame) if seg.active else seg.process(frame)
+            events = []
+            for f in replay or [frame]:
+                events += await loop.run_in_executor(None, seg.process, f) if seg.active else seg.process(f)
             if not muted:
                 stats.frame(frame, seg.last_vad, muted=False)
             if seg.turn_ms:
