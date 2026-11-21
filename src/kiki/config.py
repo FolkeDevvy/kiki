@@ -44,7 +44,10 @@ class Settings:
     # The turn-taking gate always runs locally (it judges every turn).
     brain: str = _env("KIKI_BRAIN", "claude")
     claude_model: str = _env("KIKI_CLAUDE_MODEL", "claude-opus-5-5")
-    claude_effort: str = _env("KIKI_CLAUDE_EFFORT", "medium")
+    # replies: low = ~0.8 s faster first words (median 1.8 s vs 2.6 s, p90 2.7 vs 4.3 s,
+    # scripts/bench_claude.py); research runs in the background, so it keeps medium
+    claude_effort: str = _env("KIKI_CLAUDE_EFFORT", "low")
+    claude_research_effort: str = _env("KIKI_CLAUDE_RESEARCH_EFFORT", "medium")
 
     # Web lookups via self-hosted SearXNG (used by the local brain); empty disables them
     search_url: str = _env("KIKI_SEARCH_URL", "")

@@ -203,8 +203,9 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
 - **All voices female:** Kiki's own voices and every synthetic test speaker.
 - **Mostly self-hosted:** speech-to-text, voice, turn detection, the gate and
   speaker ID run locally (2026-11-21).
-- **Brain on Claude** (2026-11-21, reverses "local LLM only"): replies and web
-  research use Claude Opus 5.5 at medium effort through the Claude Agent SDK
+- **Brain on Claude** (2026-11-21, reverses "local LLM only"): replies use Claude
+  Opus 5.5 at low effort (~0.8 s faster than medium, `scripts/bench_claude.py`) and
+  web research at medium effort through the Claude Agent SDK
   (Claude Code), authenticated with the user's subscription
   (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`).
   - One persistent Claude session per conversation receives only the new lines.

@@ -84,8 +84,9 @@ class Models:
         if s.brain == "claude" and not self.use_claude:
             print("[server] KIKI_BRAIN=claude but no CLAUDE_CODE_OAUTH_TOKEN; using the local brain", flush=True)
         if self.use_claude:
-            self.research = claude_brain.ClaudeResearcher(s.claude_model, s.claude_effort)
-            print(f"[server] brain: Claude ({s.claude_model}, effort {s.claude_effort}) via Claude Code", flush=True)
+            self.research = claude_brain.ClaudeResearcher(s.claude_model, s.claude_research_effort)
+            print(f"[server] brain: Claude ({s.claude_model}, effort {s.claude_effort} for replies, "
+                  f"{s.claude_research_effort} for research) via Claude Code", flush=True)
         self.claude_model, self.claude_effort = s.claude_model, s.claude_effort
         # TTS gets its own thread so replies never queue behind transcription
         self.tts_pool = ThreadPoolExecutor(max_workers=1)
