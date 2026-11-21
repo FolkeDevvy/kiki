@@ -25,8 +25,10 @@ class Model:
 MODELS = [
     # MIT
     Model("silero_vad.onnx", "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx", "edge"),
-    # BSD-2, int8 CPU build
+    # BSD-2. int8 build: fast on x86. fp32 build (published as "-gpu", runs fine on
+    # CPU): use on ARM, where onnxruntime's int8 conv kernels are extremely slow.
     Model("smart-turn-v3.2-cpu.onnx", "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx?download=true", "edge"),
+    Model("smart-turn-v3.2-gpu.onnx", "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-gpu.onnx?download=true", "edge"),
     # NVIDIA Parakeet TDT 0.6B v2 (English), int8, CC-BY-4.0
     Model("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8", f"{SHERPA}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2", "server", archive=True),
     # WeSpeaker ResNet34 (VoxCeleb, large-margin fine-tuned)
@@ -34,6 +36,16 @@ MODELS = [
     # Kokoro 82M, multi-lang v1.0 (has af_heart etc.), Apache-2.0
     Model("kokoro-multi-lang-v1_0", f"{SHERPA}/tts-models/kokoro-multi-lang-v1_0.tar.bz2", "server", archive=True),
 ]
+
+
+def smart_turn_file(setting: str = "auto") -> str:
+    """Which Smart Turn build to use: int8 on x86, fp32 on ARM (Pi)."""
+    if setting != "auto":
+        return setting
+    import platform
+
+    arm = platform.machine().lower() in ("aarch64", "arm64", "armv7l")
+    return "smart-turn-v3.2-gpu.onnx" if arm else "smart-turn-v3.2-cpu.onnx"
 
 
 def path(models_dir: Path, name: str) -> Path:

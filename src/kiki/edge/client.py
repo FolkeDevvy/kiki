@@ -27,7 +27,7 @@ ECHO_TAIL_S = 0.4  # keep ignoring the mic briefly after playback (room reverb)
 
 def build_segmenter(s: Settings) -> Segmenter:
     vad = SileroVad(models.path(s.models_dir, "silero_vad.onnx"))
-    turn = SmartTurn(models.path(s.models_dir, "smart-turn-v3.2-cpu.onnx"))
+    turn = SmartTurn(models.path(s.models_dir, models.smart_turn_file(s.smart_turn_model)))
     return Segmenter(s, vad, turn)
 
 

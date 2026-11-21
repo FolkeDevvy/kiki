@@ -53,7 +53,7 @@ def _bench(args: argparse.Namespace) -> None:
 
     s = config.load()
     vad = SileroVad(models.path(s.models_dir, "silero_vad.onnx"))
-    turn = SmartTurn(models.path(s.models_dir, "smart-turn-v3.2-cpu.onnx"))
+    turn = SmartTurn(models.path(s.models_dir, models.smart_turn_file(s.smart_turn_model)))
     rng = np.random.default_rng(0)
     frame = (rng.standard_normal(512) * 1000).astype(np.int16)
     audio = (rng.standard_normal(16000 * 8) * 1000).astype(np.int16)
@@ -65,9 +65,10 @@ def _bench(args: argparse.Namespace) -> None:
             fn()
         return (time.perf_counter() - t) / n * 1000
 
-    print(f"silero vad / 32 ms frame : {timeit(lambda: vad(frame), 300):6.2f} ms")
-    print(f"smart-turn features (8 s): {timeit(lambda: turn.features(audio), 10):6.2f} ms")
-    print(f"smart-turn total     (8 s): {timeit(lambda: turn(audio), 10):6.2f} ms")
+    print(f"smart-turn model: {models.smart_turn_file(s.smart_turn_model)}", flush=True)
+    print(f"silero vad / 32 ms frame : {timeit(lambda: vad(frame), 300):6.2f} ms", flush=True)
+    print(f"smart-turn features (8 s): {timeit(lambda: turn.features(audio), 10):6.2f} ms", flush=True)
+    print(f"smart-turn total     (8 s): {timeit(lambda: turn(audio), 5):6.2f} ms", flush=True)
 
 
 def _devices(_: argparse.Namespace) -> None:
