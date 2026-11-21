@@ -48,6 +48,9 @@ class Settings:
     proactivity: int = int(_env("KIKI_PROACTIVITY", "1"))
     history_turns: int = int(_env("KIKI_HISTORY_TURNS", "40"))
 
+    # Diagnostics HTTP port on the server (see server/diagnostics.py)
+    debug_port: int = int(_env("KIKI_DEBUG_PORT", "8766"))
+
     # Audio device (sounddevice name or index); empty = system default
     input_device: str = _env("KIKI_INPUT_DEVICE", "")
 

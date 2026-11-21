@@ -13,6 +13,7 @@ services:
       args:
         UV_GROUPS: "--no-dev"  # no test deps on the Pi
     image: kiki:edge
+    hostname: kiki-pi  # how the edge identifies itself to the server
     restart: unless-stopped
     command: ["edge", "--server", "${KIKI_SERVER:?set KIKI_SERVER=ws://<laptop-ip>:8765 in .env}"]
     devices:

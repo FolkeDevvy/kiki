@@ -33,6 +33,9 @@ services:
     depends_on: [llm]
     ports:
       - "8765:8765"  # the Pi connects here
+      # diagnostics page/API: serves room recordings, so localhost-only by default.
+      # KIKI_DEBUG_BIND=0.0.0.0 in .env to open it on the LAN.
+      - "${KIKI_DEBUG_BIND:-127.0.0.1}:8766:8766"
 
   edge:
     <<: *kiki

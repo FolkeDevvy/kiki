@@ -82,7 +82,12 @@ async def mic_frames(device: str | int | None = None) -> AsyncIterator[np.ndarra
             yield await q.get()
 
 
+dropped_frames = 0  # mic frames dropped because processing fell behind (edge stats)
+
+
 def _put_dropping(q: asyncio.Queue, item) -> None:
+    global dropped_frames
     if q.full():
         q.get_nowait()  # we're falling behind; drop the oldest frame
+        dropped_frames += 1
     q.put_nowait(item)

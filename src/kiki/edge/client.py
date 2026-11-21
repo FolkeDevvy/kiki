@@ -19,6 +19,7 @@ from kiki.audio.turn import SmartTurn
 from kiki.audio.vad import SileroVad
 from kiki.config import SAMPLE_RATE, Settings
 from kiki.edge.player import Player
+from kiki.edge.stats import EdgeStats
 from kiki.events import Segment, SpeechPaused, SpeechStarted, TurnEnded
 from kiki.protocol import dumps
 
@@ -35,9 +36,10 @@ class Link:
     """Websocket to the server that reconnects in the background; sends are
     dropped (with a note) while it's down, since stale audio isn't useful."""
 
-    def __init__(self, url: str, player: Player) -> None:
+    def __init__(self, url: str, player: Player, hello: dict | None = None) -> None:
         self.url = url
         self.player = player
+        self.hello = hello or {}
         self.ws: ClientConnection | None = None
         self.saying = False  # between the server's "say" and "say_end"
         self._task = asyncio.create_task(self._run())
@@ -46,7 +48,7 @@ class Link:
         while True:
             try:
                 async with connect(self.url, max_size=8 * 1024 * 1024, open_timeout=5) as ws:
-                    await ws.send(dumps("hello", device=socket.gethostname(), sample_rate=SAMPLE_RATE))
+                    await ws.send(dumps("hello", device=socket.gethostname(), sample_rate=SAMPLE_RATE, **self.hello))
                     self.ws = ws
                     print(f"[edge] connected to {self.url}", flush=True)
                     await self._receive(ws)
@@ -109,18 +111,39 @@ async def run(
 ) -> None:
     seg = build_segmenter(s)
     player = Player(enabled=playback, save_dir=save_replies)
-    link = Link(server_url, player) if server_url else None
+    import platform
+
+    hello = {
+        "arch": platform.machine(),
+        "smart_turn_model": models.smart_turn_file(s.smart_turn_model),
+        "input_device": s.input_device or "default",
+        "half_duplex": half_duplex,
+        "vad_threshold": s.vad_threshold,
+    }
+    link = Link(server_url, player, hello) if server_url else None
+    stats = EdgeStats(s.vad_threshold)
     if link is not None and not await link.wait_connected(10):
         print(f"[edge] server {server_url} not reachable yet; will keep retrying", flush=True)
     loop = asyncio.get_running_loop()
     try:
         async for frame in frames:
-            if half_duplex and time.monotonic() < player.busy_until + ECHO_TAIL_S:
+            muted = half_duplex and time.monotonic() < player.busy_until + ECHO_TAIL_S
+            if muted:
                 # Kiki is talking and we have no echo cancellation yet: don't
                 # listen to ourselves. Feed silence so VAD/turn state settles.
+                stats.frame(frame, None, muted=True)
                 frame = np.zeros_like(frame)
             # Smart Turn takes ~100 ms on a pause; keep it off the event loop
             events = await loop.run_in_executor(None, seg.process, frame) if seg.active else seg.process(frame)
+            if not muted:
+                stats.frame(frame, seg.last_vad, muted=False)
+            if seg.turn_ms:
+                stats.turn_ms += seg.turn_ms
+                seg.turn_ms.clear()
+            if stats.due():
+                snap = stats.snapshot()
+                if link:
+                    await link.send(dumps("stats", **snap))
             for ev in events:
                 if isinstance(ev, SpeechStarted):
                     print(f"{ev.t:7.2f}  ● speech", flush=True)
@@ -129,6 +152,7 @@ async def run(
                 elif isinstance(ev, SpeechPaused):
                     pass
                 elif isinstance(ev, Segment):
+                    stats.segments += 1
                     if link:
                         await link.send(dumps("segment", t0=ev.t0, t1=ev.t1), ev.audio.astype(np.int16).tobytes())
                 elif isinstance(ev, TurnEnded):

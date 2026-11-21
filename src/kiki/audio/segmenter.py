@@ -7,6 +7,7 @@ States:  IDLE --speech--> SPEECH --short silence--> PAUSED --Smart Turn says don
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from enum import Enum
 from typing import Callable
@@ -45,6 +46,8 @@ class Segmenter:
         self._speech_run = 0  # consecutive speech frames
         self._silence_run = 0  # consecutive non-speech frames
         self.last_probability: float | None = None
+        self.last_vad = 0.0
+        self.turn_ms: list[float] = []  # Smart Turn call durations (drained by edge stats)
 
     @property
     def t(self) -> float:
@@ -58,6 +61,7 @@ class Segmenter:
         """Feed one 512-sample int16 frame; returns events in order."""
         assert len(frame) == FRAME_SAMPLES
         p = self.vad(frame)
+        self.last_vad = p
         self.samples += FRAME_SAMPLES
         events: list[Event] = []
         is_speech = p >= self.s.vad_threshold
@@ -84,7 +88,9 @@ class Segmenter:
                 self.state = State.PAUSED
                 events.append(SpeechPaused(t=self.t))
                 events.append(self._segment())
+                t = time.perf_counter()
                 prob = self.turn(self.turn_audio())
+                self.turn_ms.append((time.perf_counter() - t) * 1000)
                 self.last_probability = prob
                 if prob >= self.s.turn_threshold:
                     events.append(self._end(prob, forced=False))

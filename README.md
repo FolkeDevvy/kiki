@@ -24,6 +24,16 @@ Enroll a known voice: `docker compose run --rm server enroll Folke recordings/fo
 Replay with Kiki's replies saved instead of played:
 `docker compose run --rm edge edge --server ws://server:8765 --wav recordings/conv3.wav --no-playback --save-replies recordings/replies`
 
+## Diagnostics
+
+The server serves a diagnostics page at <http://localhost:8766/>. It shows the Pi's
+mic level, clipping, dropped frames, temperature and throttling every 5 s; recent
+speech segments with transcript, speaker and a playable WAV; turn decisions with
+the gate's probabilities; and Kiki's replies with their latency. JSON is under
+`/api/status`, `/api/segments`, `/api/turns`, `/api/replies` and `/api/stats`. The
+page serves room recordings, so it's bound to localhost unless you set
+`KIKI_DEBUG_BIND=0.0.0.0` in `.env`.
+
 ## On the Pi (edge)
 
 ```sh

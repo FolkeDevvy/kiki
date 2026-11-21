@@ -23,6 +23,8 @@ from websockets.exceptions import ConnectionClosed
 from kiki.config import SAMPLE_RATE, Settings
 from kiki.protocol import dumps
 from kiki.server.brain import Brain, Decision, is_pass
+from kiki.server.diagnostics import Diagnostics
+from kiki.server.diagnostics import serve as serve_diagnostics
 from kiki.server.gate import Gate
 from kiki.server.lang import detect
 from kiki.server.llm import LLM
@@ -85,8 +87,11 @@ class Models:
 
 
 class Session:
-    def __init__(self, s: Settings, models: Models, registry: Registry, pool: ThreadPoolExecutor, log_dir: Path) -> None:
+    def __init__(self, s: Settings, models: Models, registry: Registry, pool: ThreadPoolExecutor, log_dir: Path,
+                 diag: Diagnostics | None = None) -> None:
         self.m = models
+        self.diag = diag or Diagnostics()
+        self.edge = "?"
         self.registry = registry
         self.pool = pool
         self.brain = Brain(models.llm, models.gate, s.engagement_window_s, s.history_turns, s.proactivity)
@@ -119,10 +124,15 @@ class Session:
             kind = ev.get("type")
             if kind == "segment":
                 pending = ev
+            elif kind == "stats":
+                ev.pop("type", None)
+                self.diag.edge_stats(self.edge, ev)
             elif kind == "turn_end":
                 self._jobs.put_nowait(("turn_end", ev, time.perf_counter()))
             elif kind == "hello":
-                print(f"[server] edge connected: {ev.get('device')}", flush=True)
+                self.edge = str(ev.get("device", "?"))
+                self.diag.edge_hello(self.edge, {k: v for k, v in ev.items() if k != "type"})
+                print(f"[server] edge connected: {self.edge}", flush=True)
 
     async def _work(self) -> None:
         while True:
@@ -147,6 +157,7 @@ class Session:
         fallback = self._current[-1].speaker if self._current else None
         who, sim = self.registry.assign(emb, len(audio) / SAMPLE_RATE, fallback=fallback)
         ms = (time.perf_counter() - t) * 1000
+        self.diag.segment(self.edge, t0, audio, who, sim, text, ms)
         if text:
             self._current.append(Utterance(who, text, t0, t1, sim))
             print(f"{t0:7.2f}  [{who} {sim:+.2f}] {text}   ({ms:.0f} ms)", flush=True)
@@ -180,6 +191,11 @@ class Session:
         arrow = {"reply": "→ reply", "chime": "→ chime", "quiet": "· quiet"}.get(d.action, "· silent")
         print(f"{turn.end:7.2f}  ■ turn by {speaker} ({how}, p={turn.p_complete:.2f}) {arrow} "
               f"({d.reason}{gate_ms})", flush=True)
+        self.diag.turn(self.edge, {
+            "speaker": speaker, "text": turn.text, "action": d.action, "reason": d.reason,
+            "gate_probs": {k: round(v, 3) for k, v in d.verdict.probs.items()} if d.verdict else None,
+            "gate_ms": round(d.verdict.ms) if d.verdict else None, "smart_turn_p": turn.p_complete,
+            "forced": turn.forced})
         self._write({"kind": "turn", **asdict(turn), "decision": {
             "action": d.action, "reason": d.reason, "named": d.named,
             "gate": asdict(d.verdict) if d.verdict else None}})
@@ -264,6 +280,9 @@ class Session:
             fa = f"{first_audio * 1000:.0f} ms" if first_audio is not None else "n/a"
             print(f"          [Kiki] {text}   (first audio {fa}; {breakdown} ms)", flush=True)
             self._write({"kind": "kiki", "text": text, "chime": chime, "first_audio_s": first_audio, "marks": marks})
+            self.diag.reply(self.edge, {"text": text, "chime": chime,
+                                        "marks": {k: round(v * 1000) for k, v in marks.items()},
+                                        "first_audio_ms": round(first_audio * 1000) if first_audio else None})
 
     def _write(self, rec: dict) -> None:
         self._log.write(json.dumps(rec) + "\n")
@@ -279,14 +298,17 @@ class Session:
 async def serve_forever(s: Settings, host: str, port: int, data_dir: Path) -> None:
     models = Models(s)
     pool = ThreadPoolExecutor(max_workers=2)
+    diag = Diagnostics()
+    await serve_diagnostics(diag, "0.0.0.0", s.debug_port)
 
     async def handler(ws: ServerConnection) -> None:
         # one registry per connection: enrolled voices from disk, guests local to it
         registry = Registry.load(data_dir / "speakers.json", threshold=s.speaker_threshold)
-        session = Session(s, models, registry, pool, data_dir / "logs")
+        session = Session(s, models, registry, pool, data_dir / "logs", diag)
         try:
             await session.handle(ws)
         finally:
+            diag.edge_gone(session.edge)
             await session.close()
             print("[server] edge disconnected", flush=True)
 
