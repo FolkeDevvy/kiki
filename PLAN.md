@@ -7,10 +7,13 @@ local server.
 > The research section below was written for the first, cloud-based plan. Cloud STT,
 > Claude and cloud TTS have since been dropped (see Architecture).
 
-## Hardware (current)
+## Hardware (confirmed 2026-11-21 by `scripts/pi_check.sh`)
 
-- Raspberry Pi (assumed **Pi 5, 8 GB**; please confirm), boots from the NVMe SSD. The SD card is only for recovery.
-- One USB speakerphone (mic + speaker in one device).
+- Raspberry Pi 5 Model B, 8 GB, Debian 13 (trixie) 64-bit. **Currently boots from the
+  SD card; the NVMe isn't detected yet.**
+- Jabra SPEAK 510 USB speakerphone (ALSA card `USB`). Mic: 16 kHz mono S16_LE natively.
+  Speaker: stereo, 8–48 kHz. Echo test: +15 dB above a quiet floor, so the Jabra's own
+  AEC works partially. Half-duplex stays the default; full-duplex/barge-in needs tuning.
 
 ## What the research says
 
@@ -155,8 +158,11 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
    speakerphone, echo test). ⏳ waiting on the Pi.
 1. **Ears:** VAD + Smart Turn on the edge; local STT + speaker ID on the server;
    transcript log. ✅ works with laptop mic or WAV replay.
-2. **Voice:** llama.cpp service + responder, triggered by the name only →
-   Kokoro → playback on the edge. Measure end-to-end latency.
+2. **Voice:** llama.cpp service + responder, triggered by its name (and by follow-ups
+   in the engagement window) → Kokoro → playback on the edge. ✅ on the laptop:
+   ~3.5 s from end of speech to first audio (STT 0.4 s, LLM first token +0.8 s,
+   first clause +0.6 s, TTS of that clause ~1.6 s under CPU contention). The Pi
+   edge config is in `compose.pi.yaml`.
 3. **Who:** conversational naming, calibration on real voices, merge-aware history.
 4. **Manners:** floor policy (hard rules, engagement window, local gate,
    speculative start), barge-in, decision logging.
@@ -176,5 +182,12 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
 
 - Exact Pi model and RAM, and the speakerphone model (hardware AEC?). Run
   `bash scripts/pi_check.sh` on the Pi.
-- Which local LLM(s) to use for the gate and the responder. To be benchmarked on
-  the laptop in milestone 2.
+- LLM: **Qwen3-4B-Instruct-2507 Q4_K_M on CPU** for now (~10 tok/s). Findings:
+  - The Radeon 680M via Vulkan was ~30% faster but hung the GPU under load
+    (amdgpu reset, "device wedged"), even with small batches. Don't use it.
+  - Hybrid-attention models (Qwen3.5) defeat llama.cpp's partial KV-cache reuse,
+    so every reply re-processed the whole transcript. Use pure-attention models.
+  - Ministral 3 3B was faster but its answers were worse.
+  The A4000 should cut latency to ~1.5 s: an 8–14B model on CUDA, with TTS no longer
+  competing for the CPU.
+- NVMe not detected on the Pi.

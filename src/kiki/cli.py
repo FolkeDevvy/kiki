@@ -18,7 +18,12 @@ async def _edge(args: argparse.Namespace) -> None:
 
     s = config.load()
     frames = file_frames(Path(args.wav), realtime=not args.fast) if args.wav else mic_frames(s.input_device or None)
-    await client.run(s, frames, None if args.local else args.server)
+    await client.run(
+        s, frames, None if args.local else args.server,
+        playback=not args.no_playback,
+        save_replies=Path(args.save_replies) if args.save_replies else None,
+        half_duplex=not args.full_duplex,
+    )
 
 
 def _serve(args: argparse.Namespace) -> None:
@@ -88,6 +93,9 @@ def main() -> None:
     e.add_argument("--local", action="store_true", help="no server; just print VAD/turn events")
     e.add_argument("--wav", help="replay a 16-bit WAV instead of the mic")
     e.add_argument("--fast", action="store_true", help="replay faster than real time")
+    e.add_argument("--no-playback", action="store_true", help="don't play Kiki's voice")
+    e.add_argument("--save-replies", help="also save Kiki's replies as WAVs in this dir")
+    e.add_argument("--full-duplex", action="store_true", help="keep listening while Kiki talks (needs AEC)")
 
     sv = sub.add_parser("serve", help="run the server: STT, speaker ID, brain")
     sv.add_argument("--host", default="0.0.0.0")

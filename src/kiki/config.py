@@ -36,6 +36,13 @@ class Settings:
     # re-tune with real voices from the Pi mic.
     speaker_threshold: float = float(_env("KIKI_SPEAKER_THRESHOLD", "0.68"))
 
+    # LLM (llama.cpp server, OpenAI-compatible)
+    llm_url: str = _env("KIKI_LLM_URL", "http://localhost:8081")
+    # Responder
+    kiki_voice: str = _env("KIKI_VOICE", "af_heart")
+    engagement_window_s: float = float(_env("KIKI_ENGAGEMENT_WINDOW_S", "20"))
+    history_turns: int = int(_env("KIKI_HISTORY_TURNS", "40"))
+
     # Audio device (sounddevice name or index); empty = system default
     input_device: str = _env("KIKI_INPUT_DEVICE", "")
 

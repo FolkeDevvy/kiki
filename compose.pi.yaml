@@ -1,0 +1,27 @@
+# On the Pi (edge only; the server runs on the laptop / GPU box):
+#   echo "KIKI_SERVER=ws://<laptop-ip>:8765" > .env
+#   docker compose -f compose.pi.yaml build
+#   docker compose -f compose.pi.yaml run --rm edge fetch-models --edge
+#   docker compose -f compose.pi.yaml run --rm edge bench
+#   docker compose -f compose.pi.yaml up -d && docker compose -f compose.pi.yaml logs -f
+name: kiki-edge
+
+services:
+  edge:
+    build:
+      context: .
+      args:
+        UV_GROUPS: "--no-dev"  # no test deps on the Pi
+    image: kiki:edge
+    restart: unless-stopped
+    command: ["edge", "--server", "${KIKI_SERVER:?set KIKI_SERVER=ws://<laptop-ip>:8765 in .env}"]
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./models:/app/models
+      - ./recordings:/app/recordings
+      - ./deploy/asound.pi.conf:/etc/asound.conf:ro

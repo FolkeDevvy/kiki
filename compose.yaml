@@ -26,6 +26,10 @@ services:
   server:
     <<: *kiki
     command: ["serve", "--host", "0.0.0.0"]
+    environment:
+      HOME: /tmp
+      KIKI_LLM_URL: http://llm:8080
+    depends_on: [llm]
     ports:
       - "8765:8765"  # the Pi connects here
 
@@ -39,3 +43,27 @@ services:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - /run/user/${UID:-1000}/pulse:/run/user/${UID:-1000}/pulse
+
+  # Local LLM (OpenAI-compatible API, llm:8080 inside the compose network).
+  # Laptop: CPU build. The Radeon 680M via Vulkan was ~30% faster but hung the GPU
+  # repeatedly under load ("device wedged", amdgpu reset), so it's off.
+  # A4000 box: KIKI_LLM_IMAGE=server-cuda, add `gpus: all`, LLAMA_ARG_N_GPU_LAYERS=all.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:${KIKI_LLM_IMAGE:-server}
+    restart: unless-stopped
+    command: ["--no-mmproj"]  # text only; skip the vision projector
+    environment:
+      LLAMA_CACHE: /models/llm
+      # Pure-attention model on purpose: hybrid ones (Qwen3.5) defeat partial KV-cache
+      # reuse, so every reply re-processed the whole transcript.
+      LLAMA_ARG_HF_REPO: ${KIKI_LLM_REPO:-unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M}
+      LLAMA_ARG_CTX_SIZE: "16384"
+      LLAMA_ARG_THREADS: "${KIKI_LLM_THREADS:-6}"  # 8 physical cores: leave room for TTS/STT
+      LLAMA_ARG_N_PARALLEL: "2"  # responder + gate at the same time
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: "8080"
+      LLAMA_ARG_REASONING: "off" # spoken replies need low latency, not thinking
+    volumes:
+      - ./models:/models
+    ports:
+      - "127.0.0.1:8081:8080"  # host debugging only
