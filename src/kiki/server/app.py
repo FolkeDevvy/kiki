@@ -307,6 +307,8 @@ async def serve_forever(s: Settings, host: str, port: int, data_dir: Path) -> No
         session = Session(s, models, registry, pool, data_dir / "logs", diag)
         try:
             await session.handle(ws)
+        except ConnectionClosed as e:
+            print(f"[server] edge {session.edge} dropped: {e!r}", flush=True)
         finally:
             diag.edge_gone(session.edge)
             await session.close()
