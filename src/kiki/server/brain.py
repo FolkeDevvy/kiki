@@ -49,7 +49,9 @@ def maybe_named(text: str) -> bool:
         return True
     w = [x.lower() for x in _WORDS.findall(text)[:2]]
     candidates = w[:1] + (["".join(w)] if len(w) == 2 and len(w[1]) <= 2 else [])
-    return any(c.startswith("k") and 3 <= len(c) <= 6 and _edit_distance(c, "kiki") <= 2 for c in candidates)
+    if any(c.startswith("k") and 3 <= len(c) <= 6 and _edit_distance(c, "kiki") <= 2 for c in candidates):
+        return True
+    return bool(w) and w[0].startswith(("kik", "kick", "kic")) and len(w[0]) <= 8
 
 
 class _NameMatcher:
@@ -99,6 +101,25 @@ their own lives (appointments, plans, belongings, people they know), or you aren
 the fact. Otherwise, if a well-known fact clearly settles what they're stuck on, say it in \
 one short, friendly sentence.)"""
 
+UNSURE_SUFFIX = """
+
+(Decide like a person at the table whether to answer the last line. Answer if it was said \
+to you, even without your name (your name is often misheard), or if it's clearly a follow-up \
+to what you just said. Answer exactly PASS if they're talking to each other, or just \
+mentioning or talking ABOUT you ("Kiki is smart", "I asked Kiki yesterday"): don't butt in \
+to accept compliments or make quips.)"""
+UNSURE_REPLY_P = 0.95  # local brain: gate confidence for an unverifiable reply
+# Claude brain: the gate only pre-filters; anything this plausibly meant for Kiki goes to
+# Claude, which answers or PASSes from context (no name needed).
+CANDIDATE_P = 0.35
+CANDIDATE_P_ENGAGED = 0.15
+# "nobody knows" after a question: a chance to help, if Claude agrees
+STUCK = re.compile(
+    r"\b(no idea|i don'?t know|dunno|can'?t remember|not sure|tip of my tongue|"
+    r"ingen aning|vet inte|minns inte|kommer inte ihåg|osäker|har ingen koll)\b",
+    re.IGNORECASE,
+)
+
 # proactivity level -> (min P(chime), cooldown seconds between unprompted remarks)
 PROACTIVITY = {0: (2.0, 0.0), 1: (0.7, 120.0), 2: (0.5, 45.0)}
 
@@ -122,6 +143,7 @@ class Decision:
     target: str | None = None
     verdict: Verdict | None = None
     named: bool = False
+    unsure: bool = False  # the responder may decline with PASS
 
     @property
     def respond(self) -> bool:
@@ -142,6 +164,7 @@ class Brain:
     last_target: str | None = None  # who Kiki last answered
     looking_up: list[str] = field(default_factory=list)  # queries in progress (for the prompt)
     _sent: int = 0  # history lines already sent to the Claude session
+    allow_unsure: bool = False  # set when the responder is good at PASSing (Claude)
     _maybe_named: bool = False  # set per decision: near-miss of the name at line start
 
     # ---- transcript ----
@@ -174,22 +197,23 @@ class Brain:
         content = self.transcript() + (CHIME_SUFFIX if chime else "") + state + ")" + hint
         return [{"role": "system", "content": PERSONA}, {"role": "user", "content": content}]
 
-    def _tail(self, chime: bool) -> str:
+    def _tail(self, chime: bool, unsure: bool = False) -> str:
         heard = [l.text for l in self.history if l.speaker != "Kiki"]
         hint = "\n(Svara på svenska.)" if heard and detect(heard[-1]) == "sv" else "\n(Reply in English.)"
         state = f"\n(Today is {time.strftime('%A %-d %B %Y')}."
         if self.looking_up:
             state += " You're still looking up: " + "; ".join(self.looking_up) + \
                 ". If asked about that, say you're still checking."
-        return (CHIME_SUFFIX if chime else "") + state + ")" + hint
+        extra = CHIME_SUFFIX if chime else UNSURE_SUFFIX if unsure else ""
+        return extra + state + ")" + hint
 
-    def claude_message(self, chime: bool = False) -> str:
+    def claude_message(self, chime: bool = False, unsure: bool = False) -> str:
         """The next user turn for a persistent Claude session: only the lines it
         hasn't seen (its own replies are already in the session), plus hints."""
         new = [l for l in self.history[self._sent:] if not (l.speaker == "Kiki" and l.in_session)]
         self._sent = len(self.history)
         lines = "\n".join(f"[{l.speaker}]: {l.text}" for l in new) or "(nothing new was said)"
-        return lines + self._tail(chime)
+        return lines + self._tail(chime, unsure)
 
     # ---- floor policy ----
     @property
@@ -230,6 +254,9 @@ class Brain:
             self.quiet_until = now + QUIET_S
             return Decision("quiet", "asked to be quiet", speaker, v, named)
 
+        if self.allow_unsure:
+            return self._apply_contextual(v, speaker, named, min_p, cooldown, now)
+
         if v.action == "reply":
             if named:
                 self.quiet_until = 0.0  # being addressed by name ends quiet mode
@@ -243,6 +270,9 @@ class Brain:
                 return Decision("silent", f"unnamed, and {speaker} isn't who Kiki answered", speaker, v, named)
             if self.engaged() and v.p("reply") >= UNNAMED_REPLY_P:
                 return Decision("reply", f"follow-up (p={v.p('reply'):.2f})", speaker, v, named)
+            if self.allow_unsure and v.p("reply") >= UNSURE_REPLY_P:
+                return Decision("reply", f"unverified, responder may pass (p={v.p('reply'):.2f})",
+                                speaker, v, named, unsure=True)
             return Decision("silent", f"unnamed reply not trusted (p={v.p('reply'):.2f})", speaker, v, named)
 
         if v.action == "chime":
@@ -267,6 +297,44 @@ conversation since your last reply (from speech recognition, so names and words 
 misheard; use context to understand what was meant), followed by short notes in parentheses. \
 Your own earlier replies are in this chat already. Reply with only the words Kiki says now, \
 to the last line."""
+
+
+def _apply_contextual(self, v: Verdict, speaker: str, named: bool, min_p: float, cooldown: float,
+                      now: float) -> Decision:
+    """Claude brain: like a person at the table, decide from context, not the name.
+    The local gate only filters out obvious table talk; for everything that might
+    be for Kiki, Claude sees the conversation and answers or PASSes."""
+    if self.quiet and not named:
+        return Decision("silent", "quiet mode", speaker, v, named)
+    p_reply = v.p("reply")
+    recent = self.history[-(ENGAGED_LINES + 1):-1]
+    kiki_asked = any(l.speaker == "Kiki" and l.text.rstrip().endswith("?") for l in recent)
+    text = self.history[-1].text if self.history else ""
+    question_before = any(l.text.rstrip().endswith("?") for l in self.history[-3:])
+    reasons = []
+    if named:
+        reasons.append("name said")
+    if p_reply >= CANDIDATE_P:
+        reasons.append(f"gate p={p_reply:.2f}")
+    if self.engaged() and (p_reply >= CANDIDATE_P_ENGAGED or kiki_asked):
+        reasons.append("talking with Kiki")
+    if self._maybe_named:
+        reasons.append("name-like word")
+    if reasons:
+        if named:
+            self.quiet_until = 0.0
+        return Decision("reply", "maybe for Kiki (" + ", ".join(reasons) + "); Claude decides",
+                        speaker, v, named, unsure=True)
+    stuck = bool(STUCK.search(text)) and question_before
+    if (v.action == "chime" and v.p("chime") >= min_p) or stuck:
+        if now - self.last_chime_t < cooldown:
+            return Decision("silent", "chime cooldown", speaker, v, named)
+        why = f"chime (p={v.p('chime'):.2f})" if v.action == "chime" else "nobody knows; Claude decides"
+        return Decision("chime", why, None, v, named)
+    return Decision("silent", "gate: table talk", speaker, v, named)
+
+
+Brain._apply_contextual = _apply_contextual
 
 
 def is_pass(text: str) -> bool:

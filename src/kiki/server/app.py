@@ -24,7 +24,7 @@ from websockets.exceptions import ConnectionClosed
 from kiki.config import SAMPLE_RATE, Settings
 from kiki.protocol import dumps
 from kiki.server import claude_brain
-from kiki.server.brain import PERSONA_CLAUDE, Brain, Decision, is_pass, maybe_named
+from kiki.server.brain import NAME, PERSONA_CLAUDE, Brain, Decision, is_pass, maybe_named
 from kiki.server.diagnostics import Diagnostics
 from kiki.server.diagnostics import serve as serve_diagnostics
 from kiki.server.gate import Gate
@@ -107,6 +107,7 @@ class Session:
         self.registry = registry
         self.pool = pool
         self.brain = Brain(models.llm, models.gate, s.engagement_window_s, s.history_turns, s.proactivity)
+        self.brain.allow_unsure = models.use_claude
         self.claude = (claude_brain.ClaudeResponder(PERSONA_CLAUDE, models.claude_model, models.claude_effort)
                        if models.use_claude else None)
         if self.claude is not None:
@@ -272,7 +273,8 @@ class Session:
 
         async def raw():
             if self.claude is not None:
-                source = self.claude.stream(self.brain.claude_message(chime=chime))
+                unsure = not chime  # Claude judges every reply from context, named or not
+                source = self.claude.stream(self.brain.claude_message(chime=chime, unsure=unsure))
             else:
                 source = self.brain.llm.stream(self.brain.messages(chime=chime), slot=RESPONDER_SLOT)
             async for d in source:
@@ -296,8 +298,8 @@ class Session:
                     wanted = "chime" if chime else "reply"
                     if d.action != wanted:
                         return  # speculative reply not approved
-                    if chime and is_pass(sentence):
-                        print("          [Kiki] (passed on chiming in)", flush=True)
+                    if (chime or self.claude is not None) and is_pass(sentence):
+                        print(f"          [Kiki] (passed on {'chiming in' if chime else 'an unverified reply'})", flush=True)
                         self._prewarm()
                         return
                 audio = await loop.run_in_executor(

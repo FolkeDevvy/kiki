@@ -37,5 +37,6 @@ def test_name_matches_common_spellings():
     for t in ["Kiva är huvudstaden i Norge?", "Kikes vara inte på nästa sak", "Kik i hur länge ska man koka ett ägg",
               "Klick i vilket år föll Berlinmuren"]:
         assert maybe_named(t) and not NAME.search(t), t
+    assert maybe_named("Kicking them brute first sten komma i hög spee")
     for t in ["Kom hit nu", "Kaffe, någon?", "Can you pass the milk"]:
         assert not maybe_named(t), t

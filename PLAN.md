@@ -210,7 +210,11 @@ tests/     VAD/turn segmentation, feature parity, speakers, TTS↔STT round trip
   (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`).
   - One persistent Claude session per conversation receives only the new lines.
   - Research is a separate query that may only use WebSearch and WebFetch.
-  - The turn-taking gate stays local, because it judges every turn.
+  - Turn-taking works from context, not the name. The local gate only filters out
+    obvious table talk, quickly. Anything that might be for Kiki (a confident gate, a
+    recent exchange with Kiki, a name or name-like word, "nobody knows" after a
+    question) goes to Claude, which sees the conversation and answers or replies PASS.
+    `scripts/eval_gate.py --claude`: 38/38.
   - `KIKI_BRAIN=local` switches back to llama.cpp, and the server falls back to it
     if no token is set.
   - Measured: first audio 3–7 s, against 2–3 s with local Gemma; lookups ~11 s,

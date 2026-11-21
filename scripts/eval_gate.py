@@ -70,6 +70,7 @@ S = [
 
 def brain_for(lines: list[str], gate: Gate, llm: LLM) -> Brain:
     b = Brain(llm=llm, gate=gate)
+    b.allow_unsure = CLAUDE
     for line in lines:
         who, text = line[1:].split("]: ", 1)
         if who == "Kiki":
@@ -79,11 +80,26 @@ def brain_for(lines: list[str], gate: Gate, llm: LLM) -> Brain:
     return b
 
 
+CLAUDE = "--claude" in sys.argv
+
+
 async def final_action(b: Brain, lines: list[str]) -> tuple[str, str, Verdict | None, str]:
-    """Full policy: gate + checks + (for chime) the responder's PASS."""
+    """Full policy: gate + checks + the responder's PASS (chime-ins; with --claude
+    also every reply that wasn't clearly addressed by name)."""
     who, text = lines[-1][1:].split("]: ", 1)
     d = await b.decide(who, text)
     said = ""
+    if CLAUDE and d.action in ("reply", "chime"):
+        from kiki.server.brain import NAME, PERSONA_CLAUDE
+        from kiki.server.claude_brain import ClaudeResponder
+
+        r = ClaudeResponder(PERSONA_CLAUDE, "claude-opus-5-5", "low")
+        unsure = d.action == "reply"
+        said = "".join([t async for t in r.stream(b.claude_message(chime=d.action == "chime", unsure=unsure))])
+        await r.reset()
+        if is_pass(said.strip()):
+            return "silent", "Claude: PASS", d.verdict, said
+        return "spoke", d.reason, d.verdict, said
     if d.action == "chime":
         said = "".join([t async for t in b.llm.stream(b.messages(chime=True), max_tokens=60, slot=0)])
         if is_pass(said):
@@ -102,7 +118,7 @@ async def main() -> None:
         t = time.perf_counter()
         action, reason, v, said = await final_action(b, lines)
         times.append((time.perf_counter() - t) * 1000)
-        good = action in want
+        good = action in want or (action == "spoke" and bool(want & {"reply", "chime"}))
         ok += good
         raw = f"{v.action}:{max(v.probs.values(), default=0):.2f}" if v else "-"
         extra = f'  -> "{said.strip()[:50]}"' if said and not is_pass(said) else ""

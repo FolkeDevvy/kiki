@@ -70,3 +70,42 @@ def test_misheard_name_needs_a_confident_gate():
     assert b.apply(v("reply", 0.6), "Sara", named=False).action == "silent"
     b._maybe_named = True  # "Kids are asleep": the gate says silent, so silent
     assert b.apply(v("silent", 1.0), "Sara", named=False).action == "silent"
+
+
+def test_contextual_mode_sends_plausible_lines_to_the_responder():
+    b = brain("[Folke]: Frågan när brukar första snön komma?")
+    assert b.apply(v("reply", 1.0), "Folke", named=False).action == "silent"  # local brain: no
+    b.allow_unsure = True
+    d = b.apply(v("reply", 1.0), "Folke", named=False)
+    assert d.action == "reply" and d.unsure
+    assert b.apply(v("reply", 0.4), "Folke", named=False).unsure  # plausible enough
+    assert b.apply(v("silent", 1.0), "Folke", named=False).action == "silent"  # clear table talk
+    assert "PASS" in b.claude_message(unsure=True)
+
+
+def test_contextual_mode_follow_up_without_name_and_quiet_mode():
+    b = brain("[Anna]: Kiki, capital of Sweden?")
+    b.allow_unsure = True
+    b.said("Stockholm.", target="Anna")
+    b.hear("Anna", "And Norway?")
+    from kiki.server.gate import Verdict
+    d = b.apply(Verdict("silent", {"silent": 0.8, "reply": 0.2}), "Anna", named=False)
+    assert d.action == "reply" and d.unsure  # recent exchange: let the responder judge
+    b.quiet_until = 10**12
+    assert b.apply(v("reply", 1.0), "Anna", named=False).action == "silent"
+    assert b.apply(v("reply", 1.0), "Anna", named=True).action == "reply"
+
+
+def test_contextual_mode_names_and_stuck_moments_go_to_claude():
+    b = brain("[Anna]: Kiki är faktiskt ganska smart.")
+    b.allow_unsure = True
+    d = b.apply(v("silent", 1.0), "Anna", named=True)
+    assert d.action == "reply" and d.unsure  # a mention: Claude decides, usually PASS
+    b = brain("[Anna]: How far is it to Gothenburg?", "[Bob]: I don't know, far.")
+    b.allow_unsure = True
+    assert b.apply(v("silent", 1.0), "Bob", named=False).action == "chime"
+    b = brain("[Anna]: Kiki, dinner idea?")
+    b.allow_unsure = True
+    b.said("Pasta? Do you have tomatoes?", target="Anna")
+    b.hear("Anna", "Yeah, we have some.")
+    assert b.apply(v("silent", 1.0), "Anna", named=False).unsure  # answering Kiki's question
